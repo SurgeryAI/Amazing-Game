@@ -26,7 +26,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     private var gameOverTimer: TimeInterval = 0
     private var lastUpdateTime: TimeInterval = 0
     
-    private let dropLineYOffset: CGFloat = 100
+    private let dropLineYOffset: CGFloat = 160
     private var topY: CGFloat = 0
 
     override func didMove(to view: SKView) {
@@ -40,7 +40,8 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     
     func buildEnvironment() {
         let boundary = SKNode()
-        let rect = CGRect(x: 0, y: 0, width: size.width, height: size.height)
+        let bannerHeight: CGFloat = 60
+        let rect = CGRect(x: 0, y: bannerHeight, width: size.width, height: size.height - bannerHeight)
         boundary.physicsBody = SKPhysicsBody(edgeLoopFrom: rect)
         boundary.physicsBody?.categoryBitMask = PhysicsCategory.wall
         boundary.physicsBody?.contactTestBitMask = PhysicsCategory.none

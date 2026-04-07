@@ -62,6 +62,9 @@ struct ContentView: View {
                 .padding()
                 
                 Spacer()
+                
+                BannerView()
+                    .frame(height: 50)
             }
             
             if showGameOver {
