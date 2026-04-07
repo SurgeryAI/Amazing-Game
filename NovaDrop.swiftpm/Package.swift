@@ -21,7 +21,7 @@ let package = Package(
             displayVersion: "1.0",
             bundleVersion: "1",
             appIcon: .asset("AppIcon"),
-            accentColor: .presetColor(.purple),
+            accentColor: .presetColor(.indigo),
             supportedDeviceFamilies: [
                 .pad,
                 .phone
@@ -30,11 +30,12 @@ let package = Package(
                 .portrait,
                 .portraitUpsideDown
             ],
+            appCategory: .arcadeGames,
             additionalInfoPlistContentFilePath: "Info.plist"
         )
     ],
     dependencies: [
-        .package(url: "https://github.com/googleads/swift-package-manager-google-mobile-ads.git", from: "11.2.0")
+        .package(url: "https://github.com/googleads/swift-package-manager-google-mobile-ads.git", "11.2.0"..<"12.0.0")
     ],
     targets: [
         .executableTarget(

@@ -10,7 +10,7 @@ struct BannerView: UIViewRepresentable {
         banner.adUnitID = "ca-app-pub-3940256099942544/2934735716"
         #else
         // REPLACEME: Your actual Production Banner Ad Unit ID
-        banner.adUnitID = "YOUR_PRODUCTION_BANNER_AD_UNIT_ID"
+        banner.adUnitID = "ca-app-pub-3940256099942544/2934735716"
         #endif
         
         if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
