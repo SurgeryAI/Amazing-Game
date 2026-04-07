@@ -8,15 +8,15 @@ import PackageDescription
 import AppleProductTypes
 
 let package = Package(
-    name: "Nova Drop",
+    name: "Gravity Cascade",
     platforms: [
         .iOS("16.0")
     ],
     products: [
         .iOSApplication(
-            name: "Nova Drop",
+            name: "Gravity Cascade",
             targets: ["AppModule"],
-            bundleIdentifier: "com.bookmarc.novadrop",
+            bundleIdentifier: "com.bookmarc.gravitycascade",
             teamIdentifier: "C3U5S48E88",
             displayVersion: "1.0",
             bundleVersion: "1",
