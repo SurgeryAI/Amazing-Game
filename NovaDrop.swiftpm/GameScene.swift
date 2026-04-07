@@ -31,7 +31,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
 
     override func didMove(to view: SKView) {
         backgroundColor = .black
-        physicsWorld.gravity = CGVector(dx: 0, dy: -6.0)
+        physicsWorld.gravity = CGVector(dx: 0, dy: -9.8)
         physicsWorld.contactDelegate = self
         setupHaptics()
         buildEnvironment()
@@ -114,11 +114,11 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     
     func setupBodyPhysics(node: SKShapeNode, tier: CelestialTier) {
         node.physicsBody = SKPhysicsBody(circleOfRadius: tier.radius)
-        node.physicsBody?.mass = tier.mass
-        node.physicsBody?.restitution = 0.05
-        node.physicsBody?.friction = 0.8
-        node.physicsBody?.angularDamping = 0.8
-        node.physicsBody?.linearDamping = 0.6
+        node.physicsBody?.mass = tier.radius * tier.radius * 0.001
+        node.physicsBody?.restitution = 0.1
+        node.physicsBody?.friction = 0.2
+        node.physicsBody?.angularDamping = 0.2
+        node.physicsBody?.linearDamping = 0.0
         node.physicsBody?.categoryBitMask = PhysicsCategory.body
         node.physicsBody?.contactTestBitMask = PhysicsCategory.body
         node.physicsBody?.collisionBitMask = PhysicsCategory.body | PhysicsCategory.wall
@@ -196,14 +196,9 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         
         let newNode = createBodyNode(tier: nextTier)
         newNode.position = contactPoint
-        newNode.setScale(0.1)
         addChild(newNode)
         
         setupBodyPhysics(node: newNode, tier: nextTier)
-        
-        let scaleAction = SKAction.scale(to: 1.0, duration: 0.2)
-        scaleAction.timingMode = .easeOut
-        newNode.run(scaleAction)
     }
     
     func createExplosion(at position: CGPoint, color: UIColor) {
