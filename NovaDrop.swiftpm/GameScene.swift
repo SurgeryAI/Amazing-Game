@@ -7,7 +7,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         static let none: UInt32 = 0
         static let body: UInt32 = 0b1
         static let wall: UInt32 = 0b10
-        static let deadZone: UInt32 = 0b100
     }
     
     var hapticEngine: CHHapticEngine?
@@ -22,6 +21,9 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     private var isGameOver = false
     private var activeBody: SKShapeNode?
     var currentNextTier: CelestialTier = .dust
+    
+    private var gameOverTimer: TimeInterval = 0
+    private var lastUpdateTime: TimeInterval = 0
     
     private let dropLineYOffset: CGFloat = 100
     private var topY: CGFloat = 0
@@ -46,16 +48,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         addChild(boundary)
         
         topY = size.height - dropLineYOffset
-        let deadZoneNode = SKShapeNode(rectOf: CGSize(width: size.width, height: 10))
-        deadZoneNode.position = CGPoint(x: size.width / 2, y: topY + 50)
-        deadZoneNode.fillColor = .init(white: 1.0, alpha: 0)
-        deadZoneNode.strokeColor = .clear
-        deadZoneNode.physicsBody = SKPhysicsBody(rectangleOf: deadZoneNode.frame.size)
-        deadZoneNode.physicsBody?.isDynamic = false
-        deadZoneNode.physicsBody?.categoryBitMask = PhysicsCategory.deadZone
-        deadZoneNode.physicsBody?.contactTestBitMask = PhysicsCategory.body
-        deadZoneNode.physicsBody?.collisionBitMask = PhysicsCategory.none
-        addChild(deadZoneNode)
         
         let dashedLine = SKShapeNode()
         let path = CGMutablePath()
@@ -126,7 +118,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         node.physicsBody?.angularDamping = 0.8
         node.physicsBody?.linearDamping = 0.1
         node.physicsBody?.categoryBitMask = PhysicsCategory.body
-        node.physicsBody?.contactTestBitMask = PhysicsCategory.body | PhysicsCategory.deadZone
+        node.physicsBody?.contactTestBitMask = PhysicsCategory.body
         node.physicsBody?.collisionBitMask = PhysicsCategory.body | PhysicsCategory.wall
     }
     
@@ -172,14 +164,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         let nodeA = contact.bodyA.node as? SKShapeNode
         let nodeB = contact.bodyB.node as? SKShapeNode
         
-        if contact.bodyA.categoryBitMask == PhysicsCategory.deadZone || contact.bodyB.categoryBitMask == PhysicsCategory.deadZone {
-            if let body = (contact.bodyA.categoryBitMask == PhysicsCategory.body) ? nodeA : nodeB {
-                if let vel = body.physicsBody?.velocity, abs(vel.dy) < 5 {
-                    triggerGameOver()
-                }
-            }
-            return
-        }
+
         
         guard let a = nodeA, let b = nodeB else { return }
         guard a.parent != nil && b.parent != nil else { return }
@@ -298,11 +283,46 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     func resetGame() {
         isGameOver = false
         score = 0
+        gameOverTimer = 0.0
+        lastUpdateTime = 0.0
         children.forEach { node in
             if node.name?.starts(with: "tier_") == true {
                 node.removeFromParent()
             }
         }
         spawnActiveBody()
+    }
+
+    override func update(_ currentTime: TimeInterval) {
+        guard !isGameOver else { return }
+        
+        if lastUpdateTime == 0 { lastUpdateTime = currentTime }
+        let dt = currentTime - lastUpdateTime
+        lastUpdateTime = currentTime
+        
+        var isOverflowing = false
+        
+        for child in children {
+            if child.name?.starts(with: "tier_") == true {
+                if child == activeBody { continue }
+                
+                let tier = CelestialTier(rawValue: child.userData?["tier"] as? Int ?? 0) ?? .dust
+                let topEdge = child.position.y + tier.radius
+                
+                if topEdge > topY + 10 {
+                    isOverflowing = true
+                    break
+                }
+            }
+        }
+        
+        if isOverflowing {
+            gameOverTimer += dt
+            if gameOverTimer > 2.0 {
+                triggerGameOver()
+            }
+        } else {
+            gameOverTimer = 0.0
+        }
     }
 }
