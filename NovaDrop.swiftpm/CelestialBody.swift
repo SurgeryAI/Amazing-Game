@@ -13,12 +13,12 @@ enum CelestialTier: Int, CaseIterable {
     var radius: CGFloat {
         switch self {
         case .dust: return 15
-        case .meteor: return 25
-        case .moon: return 38
-        case .planet: return 55
-        case .gasGiant: return 75
-        case .star: return 100
-        case .blackHole: return 130
+        case .meteor: return 22
+        case .moon: return 30
+        case .planet: return 42
+        case .gasGiant: return 58
+        case .star: return 80
+        case .blackHole: return 110
         }
     }
 
@@ -44,6 +44,15 @@ enum CelestialTier: Int, CaseIterable {
         case .star: return Color(uiColor: .systemYellow)
         case .blackHole: return Color(uiColor: .black)
         }
+    }
+    
+    var gradient: RadialGradient {
+        RadialGradient(
+            gradient: Gradient(colors: [color.opacity(0.6), color]),
+            center: .center,
+            startRadius: radius * 0.1,
+            endRadius: radius
+        )
     }
     
     var glowColor: UIColor {

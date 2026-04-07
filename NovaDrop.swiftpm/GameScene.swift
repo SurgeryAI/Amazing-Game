@@ -13,6 +13,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     
     var onScoreChanged: ((Int) -> Void)?
     var onGameOver: (() -> Void)?
+    var onNextTierChanged: ((CelestialTier) -> Void)?
     
     private var score = 0 {
         didSet { onScoreChanged?(score) }
@@ -79,6 +80,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         
         let tier = currentNextTier
         currentNextTier = randomStartTier()
+        onNextTierChanged?(currentNextTier)
         
         let node = createBodyNode(tier: tier)
         node.position = CGPoint(x: size.width / 2, y: topY)
@@ -113,10 +115,10 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     func setupBodyPhysics(node: SKShapeNode, tier: CelestialTier) {
         node.physicsBody = SKPhysicsBody(circleOfRadius: tier.radius)
         node.physicsBody?.mass = tier.mass
-        node.physicsBody?.restitution = 0.3
-        node.physicsBody?.friction = 0.5
+        node.physicsBody?.restitution = 0.05
+        node.physicsBody?.friction = 0.8
         node.physicsBody?.angularDamping = 0.8
-        node.physicsBody?.linearDamping = 0.1
+        node.physicsBody?.linearDamping = 0.6
         node.physicsBody?.categoryBitMask = PhysicsCategory.body
         node.physicsBody?.contactTestBitMask = PhysicsCategory.body
         node.physicsBody?.collisionBitMask = PhysicsCategory.body | PhysicsCategory.wall

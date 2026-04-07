@@ -6,6 +6,7 @@ struct ContentView: View {
     @State private var showGameOver: Bool = false
     @State private var showTutorial: Bool = !UserDefaults.standard.bool(forKey: "HasSeenTutorial")
     @State private var highScore: Int = UserDefaults.standard.integer(forKey: "HighScore")
+    @State private var nextTier: CelestialTier = .dust
     
     @State private var gameScene: GameScene = {
         let scene = GameScene()
@@ -18,7 +19,6 @@ struct ContentView: View {
             Color.black.ignoresSafeArea()
             
             SpriteView(scene: gameScene)
-                .ignoresSafeArea()
                 .allowsHitTesting(!showTutorial && !showGameOver)
             
             VStack {
@@ -31,6 +31,18 @@ struct ContentView: View {
                             .font(.system(size: 32, weight: .bold, design: .rounded))
                             .foregroundColor(.white)
                     }
+                    Spacer()
+                    VStack {
+                        Text("NEXT")
+                            .font(.headline)
+                            .foregroundColor(.gray)
+                        Circle()
+                            .fill(nextTier.gradient)
+                            .frame(width: 40, height: 40)
+                            .shadow(color: Color(uiColor: nextTier.glowColor), radius: 5)
+                            .animation(.spring(), value: nextTier)
+                    }
+                    .frame(width: 80)
                     Spacer()
                     VStack(alignment: .trailing) {
                         Text("BEST")
@@ -79,6 +91,10 @@ struct ContentView: View {
                     self.showGameOver = true
                 }
             }
+            gameScene.onNextTierChanged = { tier in
+                self.nextTier = tier
+            }
+            self.nextTier = gameScene.currentNextTier
         }
     }
 }
