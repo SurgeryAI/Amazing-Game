@@ -23,6 +23,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     private var activeBody: SKShapeNode?
     var currentNextTier: CelestialTier = .dust
     private var mergingIds = Set<String>()
+    private let playLayer = SKNode()
 
     // Combo chain multiplier state
     private var comboCount: Int = 0
@@ -54,6 +55,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         boundary.physicsBody?.collisionBitMask = PhysicsCategory.body
         boundary.physicsBody?.restitution = 0.2
         addChild(boundary)
+        addChild(playLayer)
         
         topY = size.height - dropLineYOffset
         
@@ -97,7 +99,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         
         node.physicsBody = nil
         node.alpha = 0.5
-        addChild(node)
+        playLayer.addChild(node)
         activeBody = node
     }
     
@@ -272,10 +274,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     func handleMerge(nodeA: SKShapeNode, nodeB: SKShapeNode, tier: CelestialTier, contactPoint: CGPoint) {
         let idA = nodeA.userData?["mergeId"] as? String ?? ""
         let idB = nodeB.userData?["mergeId"] as? String ?? ""
-        defer {
-            mergingIds.remove(idA)
-            mergingIds.remove(idB)
-        }
 
         nodeA.removeFromParent()
         nodeB.removeFromParent()
@@ -306,7 +304,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
 
         let newNode = createBodyNode(tier: nextTier)
         newNode.position = contactPoint
-        addChild(newNode)
+        playLayer.addChild(newNode)
 
         setupBodyPhysics(node: newNode, tier: nextTier)
     }
@@ -420,11 +418,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         lastMergeTime = 0
         currentNextTier = randomStartTier()
         mergingIds.removeAll()
-        children.forEach { node in
-            if node.name?.starts(with: "tier_") == true {
-                node.removeFromParent()
-            }
-        }
+        playLayer.removeAllChildren()
         spawnActiveBody()
     }
 
@@ -436,22 +430,23 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         lastUpdateTime = currentTime
 
         // Black Hole Gravity Well: attract nearby bodies toward each black hole
-        let allNodes = children.compactMap { $0 as? SKShapeNode }
-            .filter { $0.name?.starts(with: "tier_") == true && $0 != activeBody }
+        let allNodes = playLayer.children.compactMap { $0 as? SKShapeNode }
+            .filter { $0 != activeBody }
         let blackHoles = allNodes.filter {
             ($0.userData?["tier"] as? Int) == CelestialTier.blackHole.rawValue
         }
         if !blackHoles.isEmpty {
-            let pullRadius: CGFloat = 220
+            let pullRadiusSq: CGFloat = 220 * 220
             let pullStrength: CGFloat = 180
             for bh in blackHoles {
                 for body in allNodes where body !== bh {
                     guard let pb = body.physicsBody else { continue }
                     let diff = CGVector(dx: bh.position.x - body.position.x,
                                        dy: bh.position.y - body.position.y)
-                    let dist = sqrt(diff.dx * diff.dx + diff.dy * diff.dy)
-                    guard dist > 1 && dist < pullRadius else { continue }
-                    let scale = pullStrength * (1 - dist / pullRadius)
+                    let distSq = diff.dx * diff.dx + diff.dy * diff.dy
+                    guard distSq > 1 && distSq < pullRadiusSq else { continue }
+                    let dist = sqrt(distSq)
+                    let scale = pullStrength * (1 - dist / 220)
                     let force = CGVector(dx: diff.dx / dist * scale,
                                         dy: diff.dy / dist * scale)
                     pb.applyForce(force)
@@ -461,17 +456,15 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
 
         var isOverflowing = false
         
-        for child in children {
-            if child.name?.starts(with: "tier_") == true {
-                if child == activeBody { continue }
-                
-                let tier = CelestialTier(rawValue: child.userData?["tier"] as? Int ?? 0) ?? .dust
-                let topEdge = child.position.y + tier.radius
-                
-                if topEdge > topY + 10 {
-                    isOverflowing = true
-                    break
-                }
+        for child in playLayer.children {
+            if child == activeBody { continue }
+            
+            let tier = CelestialTier(rawValue: child.userData?["tier"] as? Int ?? 0) ?? .dust
+            let topEdge = child.position.y + tier.radius
+            
+            if topEdge > topY + 10 {
+                isOverflowing = true
+                break
             }
         }
         
