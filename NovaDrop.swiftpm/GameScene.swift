@@ -22,6 +22,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     private var isGameOver = false
     private var activeBody: SKShapeNode?
     var currentNextTier: CelestialTier = .dust
+    private var mergingIds = Set<String>()
     
     private var gameOverTimer: TimeInterval = 0
     private var lastUpdateTime: TimeInterval = 0
@@ -115,7 +116,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     
     func setupBodyPhysics(node: SKShapeNode, tier: CelestialTier) {
         node.physicsBody = SKPhysicsBody(circleOfRadius: tier.radius)
-        node.physicsBody?.mass = tier.radius * tier.radius * 0.001
+        node.physicsBody?.mass = tier.mass
         node.physicsBody?.restitution = 0.1
         node.physicsBody?.friction = 0.2
         node.physicsBody?.angularDamping = 0.2
@@ -138,6 +139,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     }
     
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard !isGameOver else { return }
         dropActiveBody()
     }
     
@@ -176,11 +178,23 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         let tierBValue = b.userData?["tier"] as? Int ?? -2
         
         if tierAValue == tierBValue, let tier = CelestialTier(rawValue: tierAValue) {
+            let idA = a.userData?["mergeId"] as? String ?? ""
+            let idB = b.userData?["mergeId"] as? String ?? ""
+            guard !mergingIds.contains(idA), !mergingIds.contains(idB) else { return }
+            mergingIds.insert(idA)
+            mergingIds.insert(idB)
             handleMerge(nodeA: a, nodeB: b, tier: tier, contactPoint: contact.contactPoint)
         }
     }
     
     func handleMerge(nodeA: SKShapeNode, nodeB: SKShapeNode, tier: CelestialTier, contactPoint: CGPoint) {
+        let idA = nodeA.userData?["mergeId"] as? String ?? ""
+        let idB = nodeB.userData?["mergeId"] as? String ?? ""
+        defer {
+            mergingIds.remove(idA)
+            mergingIds.remove(idB)
+        }
+
         nodeA.removeFromParent()
         nodeB.removeFromParent()
         
@@ -191,7 +205,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         playHaptic(for: tier)
         
         guard let nextTier = tier.nextTier else {
-            playHaptic(for: .blackHole)
             return
         }
         
@@ -283,6 +296,8 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         score = 0
         gameOverTimer = 0.0
         lastUpdateTime = 0.0
+        currentNextTier = randomStartTier()
+        mergingIds.removeAll()
         children.forEach { node in
             if node.name?.starts(with: "tier_") == true {
                 node.removeFromParent()
