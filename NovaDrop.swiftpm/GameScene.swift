@@ -22,7 +22,13 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     private var isGameOver = false
     private var activeBody: SKShapeNode?
     var currentNextTier: CelestialTier = .dust
-    
+    private var mergingIds = Set<String>()
+
+    // Combo chain multiplier state
+    private var comboCount: Int = 0
+    private var lastMergeTime: TimeInterval = 0
+    private let comboWindow: TimeInterval = 1.5
+
     private var gameOverTimer: TimeInterval = 0
     private var lastUpdateTime: TimeInterval = 0
     
@@ -72,7 +78,10 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     }
     
     func randomStartTier() -> CelestialTier {
-        let maxTier = min(2, CelestialTier.allCases.count - 1)
+        var maxRaw = 2  // up to Moon by default
+        if score >= 500 { maxRaw = 4 }   // Gas Giant unlocked
+        else if score >= 200 { maxRaw = 3 } // Planet unlocked
+        let maxTier = min(maxRaw, CelestialTier.allCases.count - 1)
         return CelestialTier(rawValue: Int.random(in: 0...maxTier)) ?? .dust
     }
     
@@ -115,7 +124,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     
     func setupBodyPhysics(node: SKShapeNode, tier: CelestialTier) {
         node.physicsBody = SKPhysicsBody(circleOfRadius: tier.radius)
-        node.physicsBody?.mass = tier.radius * tier.radius * 0.001
+        node.physicsBody?.mass = tier.mass
         node.physicsBody?.restitution = 0.1
         node.physicsBody?.friction = 0.2
         node.physicsBody?.angularDamping = 0.2
@@ -138,6 +147,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     }
     
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard !isGameOver else { return }
         dropActiveBody()
     }
     
@@ -176,30 +186,79 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         let tierBValue = b.userData?["tier"] as? Int ?? -2
         
         if tierAValue == tierBValue, let tier = CelestialTier(rawValue: tierAValue) {
+            let idA = a.userData?["mergeId"] as? String ?? ""
+            let idB = b.userData?["mergeId"] as? String ?? ""
+            guard !mergingIds.contains(idA), !mergingIds.contains(idB) else { return }
+            mergingIds.insert(idA)
+            mergingIds.insert(idB)
             handleMerge(nodeA: a, nodeB: b, tier: tier, contactPoint: contact.contactPoint)
         }
     }
     
     func handleMerge(nodeA: SKShapeNode, nodeB: SKShapeNode, tier: CelestialTier, contactPoint: CGPoint) {
+        let idA = nodeA.userData?["mergeId"] as? String ?? ""
+        let idB = nodeB.userData?["mergeId"] as? String ?? ""
+        defer {
+            mergingIds.remove(idA)
+            mergingIds.remove(idB)
+        }
+
         nodeA.removeFromParent()
         nodeB.removeFromParent()
-        
-        let scoreGain = tier.scoreValue
+
+        // Combo chain multiplier
+        let now = CACurrentMediaTime()
+        if now - lastMergeTime <= comboWindow {
+            comboCount += 1
+        } else {
+            comboCount = 1
+        }
+        lastMergeTime = now
+
+        let multiplier = comboCount
+        let scoreGain = tier.scoreValue * multiplier
         score += scoreGain
-        
+
+        if multiplier > 1 {
+            showComboLabel(multiplier: multiplier, at: contactPoint)
+        }
+
         createExplosion(at: contactPoint, color: tier.glowColor)
         playHaptic(for: tier)
-        
+
         guard let nextTier = tier.nextTier else {
-            playHaptic(for: .blackHole)
             return
         }
-        
+
         let newNode = createBodyNode(tier: nextTier)
         newNode.position = contactPoint
         addChild(newNode)
-        
+
         setupBodyPhysics(node: newNode, tier: nextTier)
+    }
+
+    func showComboLabel(multiplier: Int, at position: CGPoint) {
+        let label = SKLabelNode(text: "\(multiplier)x COMBO!")
+        label.fontName = "AvenirNext-Heavy"
+        label.fontSize = 22 + CGFloat(min(multiplier, 8)) * 3
+        label.fontColor = .systemYellow
+        label.position = position
+        label.zPosition = 100
+        label.alpha = 0
+        addChild(label)
+
+        let appear = SKAction.fadeIn(withDuration: 0.1)
+        let scale = SKAction.sequence([
+            SKAction.scale(to: 1.3, duration: 0.15),
+            SKAction.scale(to: 1.0, duration: 0.1)
+        ])
+        let rise = SKAction.moveBy(x: 0, y: 50, duration: 0.8)
+        let fadeOut = SKAction.fadeOut(withDuration: 0.4)
+        let wait = SKAction.wait(forDuration: 0.5)
+        let remove = SKAction.removeFromParent()
+
+        label.run(SKAction.group([scale, SKAction.sequence([appear, wait, fadeOut, remove])]))
+        label.run(rise)
     }
     
     func createExplosion(at position: CGPoint, color: UIColor) {
@@ -283,6 +342,10 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         score = 0
         gameOverTimer = 0.0
         lastUpdateTime = 0.0
+        comboCount = 0
+        lastMergeTime = 0
+        currentNextTier = randomStartTier()
+        mergingIds.removeAll()
         children.forEach { node in
             if node.name?.starts(with: "tier_") == true {
                 node.removeFromParent()
@@ -297,7 +360,31 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         if lastUpdateTime == 0 { lastUpdateTime = currentTime }
         let dt = currentTime - lastUpdateTime
         lastUpdateTime = currentTime
-        
+
+        // Black Hole Gravity Well: attract nearby bodies toward each black hole
+        let allNodes = children.compactMap { $0 as? SKShapeNode }
+            .filter { $0.name?.starts(with: "tier_") == true && $0 != activeBody }
+        let blackHoles = allNodes.filter {
+            ($0.userData?["tier"] as? Int) == CelestialTier.blackHole.rawValue
+        }
+        if !blackHoles.isEmpty {
+            let pullRadius: CGFloat = 220
+            let pullStrength: CGFloat = 180
+            for bh in blackHoles {
+                for body in allNodes where body !== bh {
+                    guard let pb = body.physicsBody else { continue }
+                    let diff = CGVector(dx: bh.position.x - body.position.x,
+                                       dy: bh.position.y - body.position.y)
+                    let dist = sqrt(diff.dx * diff.dx + diff.dy * diff.dy)
+                    guard dist > 1 && dist < pullRadius else { continue }
+                    let scale = pullStrength * (1 - dist / pullRadius)
+                    let force = CGVector(dx: diff.dx / dist * scale,
+                                        dy: diff.dy / dist * scale)
+                    pb.applyForce(force)
+                }
+            }
+        }
+
         var isOverflowing = false
         
         for child in children {
