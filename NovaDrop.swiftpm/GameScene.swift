@@ -105,14 +105,88 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         let node = SKShapeNode(circleOfRadius: tier.radius)
         node.fillColor = UIColor(tier.color)
         node.strokeColor = tier.glowColor
-        node.lineWidth = 3
-        node.glowWidth = 4
-        
+        node.lineWidth = 2
+
+        // Scale glow width with tier so larger bodies feel more dramatic
+        let glowWidths: [CelestialTier: CGFloat] = [
+            .dust: 5, .meteor: 6, .moon: 8, .planet: 10,
+            .gasGiant: 12, .star: 14, .blackHole: 22
+        ]
+        node.glowWidth = glowWidths[tier] ?? 8
+
         if tier == .blackHole {
             node.fillColor = .black
-            node.glowWidth = 15
         }
-        
+
+        // Inner rim lighting — a slightly smaller ring painted with the glow
+        // colour to simulate light wrapping around the edge of the sphere.
+        let rimRadiusScale: CGFloat = 0.88      // ring sits just inside the orb edge
+        let rimAlpha: CGFloat = 0.45
+        let rimLineWidthScale: CGFloat = 0.18   // thick enough to fill toward the edge
+        let rimNode = SKShapeNode(circleOfRadius: tier.radius * rimRadiusScale)
+        rimNode.fillColor = .clear
+        rimNode.strokeColor = tier.glowColor.withAlphaComponent(rimAlpha)
+        rimNode.lineWidth = tier.radius * rimLineWidthScale
+        rimNode.zPosition = 1
+        node.addChild(rimNode)
+
+        // Specular highlight — a bright spot offset to the top-left, simulating
+        // a light source at roughly 10 o'clock, giving each orb a 3D sphere look.
+        let highlightRadiusScale: CGFloat = 0.30
+        let highlightAlpha: CGFloat = 0.45
+        let highlightOffsetX: CGFloat = -0.26   // fraction of radius, left of centre
+        let highlightOffsetY: CGFloat = 0.27    // fraction of radius, above centre
+        if tier != .blackHole {
+            let highlight = SKShapeNode(circleOfRadius: tier.radius * highlightRadiusScale)
+            highlight.fillColor = UIColor(white: 1.0, alpha: highlightAlpha)
+            highlight.strokeColor = .clear
+            highlight.position = CGPoint(x: tier.radius * highlightOffsetX,
+                                         y: tier.radius * highlightOffsetY)
+            highlight.zPosition = 2
+            node.addChild(highlight)
+        }
+
+        // Gas Giant — decorative planetary ring in the orbital plane
+        if tier == .gasGiant {
+            let ring = SKShapeNode(ellipseOf: CGSize(
+                width: tier.radius * 2.6, height: tier.radius * 0.52))
+            ring.fillColor = .clear
+            ring.strokeColor = UIColor.purple.withAlphaComponent(0.60)
+            ring.lineWidth = 4
+            ring.glowWidth = 4
+            ring.zPosition = -1
+            node.addChild(ring)
+        }
+
+        // Star — glow pulses to simulate radiant energy
+        if tier == .star {
+            let minStarGlow: CGFloat = 14
+            let maxStarGlow: CGFloat = 32
+            let pulseDuration: Double = 0.8
+            let glowRange = maxStarGlow - minStarGlow
+            let glowUp = SKAction.customAction(withDuration: pulseDuration) { n, elapsed in
+                (n as? SKShapeNode)?.glowWidth = minStarGlow + (elapsed / pulseDuration) * glowRange
+            }
+            let glowDown = SKAction.customAction(withDuration: pulseDuration) { n, elapsed in
+                (n as? SKShapeNode)?.glowWidth = maxStarGlow - (elapsed / pulseDuration) * glowRange
+            }
+            node.run(SKAction.repeatForever(SKAction.sequence([glowUp, glowDown])))
+        }
+
+        // Black Hole — rotating accretion disk ellipse
+        if tier == .blackHole {
+            let disk = SKShapeNode(ellipseOf: CGSize(
+                width: tier.radius * 2.8, height: tier.radius * 0.55))
+            disk.fillColor = .clear
+            disk.strokeColor = UIColor.purple.withAlphaComponent(0.90)
+            disk.lineWidth = 6
+            disk.glowWidth = 10
+            disk.zPosition = -1
+            disk.run(SKAction.repeatForever(
+                SKAction.rotate(byAngle: .pi * 2, duration: 5.0)))
+            node.addChild(disk)
+        }
+
         node.name = "tier_\(tier.rawValue)"
         let userData = NSMutableDictionary()
         userData["tier"] = tier.rawValue
