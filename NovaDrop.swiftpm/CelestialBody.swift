@@ -48,9 +48,9 @@ enum CelestialTier: Int, CaseIterable {
     
     var gradient: RadialGradient {
         RadialGradient(
-            gradient: Gradient(colors: [color.opacity(0.6), color]),
-            center: .center,
-            startRadius: radius * 0.1,
+            gradient: Gradient(colors: [Color.white.opacity(0.55), color.opacity(0.85), color]),
+            center: UnitPoint(x: 0.35, y: 0.30),
+            startRadius: radius * 0.05,
             endRadius: radius
         )
     }

@@ -39,7 +39,7 @@ struct ContentView: View {
                         Circle()
                             .fill(nextTier.gradient)
                             .frame(width: 40, height: 40)
-                            .shadow(color: Color(uiColor: nextTier.glowColor), radius: 5)
+                            .shadow(color: Color(uiColor: nextTier.glowColor).opacity(0.9), radius: 10)
                             .animation(.spring(), value: nextTier)
                     }
                     .frame(width: 80)
