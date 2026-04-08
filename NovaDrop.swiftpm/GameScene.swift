@@ -23,7 +23,12 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     private var activeBody: SKShapeNode?
     var currentNextTier: CelestialTier = .dust
     private var mergingIds = Set<String>()
-    
+
+    // Combo chain multiplier state
+    private var comboCount: Int = 0
+    private var lastMergeTime: TimeInterval = 0
+    private let comboWindow: TimeInterval = 1.5
+
     private var gameOverTimer: TimeInterval = 0
     private var lastUpdateTime: TimeInterval = 0
     
@@ -73,7 +78,10 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     }
     
     func randomStartTier() -> CelestialTier {
-        let maxTier = min(2, CelestialTier.allCases.count - 1)
+        var maxRaw = 2  // up to Moon by default
+        if score >= 500 { maxRaw = 4 }   // Gas Giant unlocked
+        else if score >= 200 { maxRaw = 3 } // Planet unlocked
+        let maxTier = min(maxRaw, CelestialTier.allCases.count - 1)
         return CelestialTier(rawValue: Int.random(in: 0...maxTier)) ?? .dust
     }
     
@@ -197,22 +205,60 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
 
         nodeA.removeFromParent()
         nodeB.removeFromParent()
-        
-        let scoreGain = tier.scoreValue
+
+        // Combo chain multiplier
+        let now = CACurrentMediaTime()
+        if now - lastMergeTime <= comboWindow {
+            comboCount += 1
+        } else {
+            comboCount = 1
+        }
+        lastMergeTime = now
+
+        let multiplier = comboCount
+        let scoreGain = tier.scoreValue * multiplier
         score += scoreGain
-        
+
+        if multiplier > 1 {
+            showComboLabel(multiplier: multiplier, at: contactPoint)
+        }
+
         createExplosion(at: contactPoint, color: tier.glowColor)
         playHaptic(for: tier)
-        
+
         guard let nextTier = tier.nextTier else {
             return
         }
-        
+
         let newNode = createBodyNode(tier: nextTier)
         newNode.position = contactPoint
         addChild(newNode)
-        
+
         setupBodyPhysics(node: newNode, tier: nextTier)
+    }
+
+    func showComboLabel(multiplier: Int, at position: CGPoint) {
+        let label = SKLabelNode(text: "\(multiplier)x COMBO!")
+        label.fontName = "AvenirNext-Heavy"
+        label.fontSize = 22 + CGFloat(min(multiplier, 8)) * 3
+        label.fontColor = .systemYellow
+        label.position = position
+        label.zPosition = 100
+        label.alpha = 0
+        addChild(label)
+
+        let appear = SKAction.fadeIn(withDuration: 0.1)
+        let scale = SKAction.sequence([
+            SKAction.scale(to: 1.3, duration: 0.15),
+            SKAction.scale(to: 1.0, duration: 0.1)
+        ])
+        let rise = SKAction.moveBy(x: 0, y: 50, duration: 0.8)
+        let fadeOut = SKAction.fadeOut(withDuration: 0.4)
+        let wait = SKAction.wait(forDuration: 0.5)
+        let remove = SKAction.removeFromParent()
+
+        label.run(SKAction.group([scale, SKAction.sequence([appear, wait, fadeOut, remove])]))
+        label.run(rise)
     }
     
     func createExplosion(at position: CGPoint, color: UIColor) {
@@ -296,6 +342,8 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         score = 0
         gameOverTimer = 0.0
         lastUpdateTime = 0.0
+        comboCount = 0
+        lastMergeTime = 0
         currentNextTier = randomStartTier()
         mergingIds.removeAll()
         children.forEach { node in
@@ -312,7 +360,31 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         if lastUpdateTime == 0 { lastUpdateTime = currentTime }
         let dt = currentTime - lastUpdateTime
         lastUpdateTime = currentTime
-        
+
+        // Black Hole Gravity Well: attract nearby bodies toward each black hole
+        let allNodes = children.compactMap { $0 as? SKShapeNode }
+            .filter { $0.name?.starts(with: "tier_") == true && $0 != activeBody }
+        let blackHoles = allNodes.filter {
+            ($0.userData?["tier"] as? Int) == CelestialTier.blackHole.rawValue
+        }
+        if !blackHoles.isEmpty {
+            let pullRadius: CGFloat = 220
+            let pullStrength: CGFloat = 180
+            for bh in blackHoles {
+                for body in allNodes where body !== bh {
+                    guard let pb = body.physicsBody else { continue }
+                    let diff = CGVector(dx: bh.position.x - body.position.x,
+                                       dy: bh.position.y - body.position.y)
+                    let dist = sqrt(diff.dx * diff.dx + diff.dy * diff.dy)
+                    guard dist > 1 && dist < pullRadius else { continue }
+                    let scale = pullStrength * (1 - dist / pullRadius)
+                    let force = CGVector(dx: diff.dx / dist * scale,
+                                        dy: diff.dy / dist * scale)
+                    pb.applyForce(force)
+                }
+            }
+        }
+
         var isOverflowing = false
         
         for child in children {
