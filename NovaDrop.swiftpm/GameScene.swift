@@ -146,9 +146,10 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         if let forced = forcePolarity {
             polarity = forced
         } else if tier != .blackHole && tier != .antimatter {
-            let r = Int.random(in: 1...100)
-            if r <= 25 { polarity = .positive }
-            else if r <= 50 { polarity = .negative }
+            // 50% chance to be charged, then a perfect 50/50 coin flip for which charge
+            if Int.random(in: 1...100) <= 50 {
+                polarity = Bool.random() ? .positive : .negative
+            }
         }
         
         node.fillColor = UIColor(tier.color)
