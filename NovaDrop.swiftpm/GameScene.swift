@@ -168,12 +168,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         }
         
         node.lineWidth = 2
-
-        let glowWidths: [CelestialTier: CGFloat] = [
-            .dust: 5, .meteor: 6, .moon: 8, .planet: 10,
-            .gasGiant: 12, .star: 14, .blackHole: 22, .antimatter: 10
-        ]
-        node.glowWidth = glowWidths[tier] ?? 8
+        node.glowWidth = tier.standardGlowWidth
 
         if tier == .blackHole {
             node.fillColor = .black
@@ -331,11 +326,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
             active.strokeColor = tier.glowColor
         }
         // Unstable bodies receive glowWidth += 5 in spawnActiveBody; reset to the standard value.
-        let glowWidths: [CelestialTier: CGFloat] = [
-            .dust: 5, .meteor: 6, .moon: 8, .planet: 10,
-            .gasGiant: 12, .star: 14, .blackHole: 22, .antimatter: 10
-        ]
-        active.glowWidth = glowWidths[tier] ?? 8
+        active.glowWidth = tier.standardGlowWidth
         setupBodyPhysics(node: active, tier: tier)
         
         activeBody = nil
