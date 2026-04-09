@@ -321,11 +321,21 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         
         active.alpha = 1.0
         let tier = CelestialTier(rawValue: active.userData?["tier"] as? Int ?? 0) ?? .dust
-        // Preserve the polarity stroke colour (+/- are cyan/orange); only neutral bodies use the tier glow.
         let polarity = active.userData?["polarity"] as? Int ?? 0
-        if polarity == Polarity.neutral.rawValue {
+        // Unstable bodies have their stroke forced to .red; always restore the correct colour on drop.
+        if polarity == Polarity.positive.rawValue {
+            active.strokeColor = .cyan
+        } else if polarity == Polarity.negative.rawValue {
+            active.strokeColor = .orange
+        } else {
             active.strokeColor = tier.glowColor
         }
+        // Unstable bodies receive glowWidth += 5 in spawnActiveBody; reset to the standard value.
+        let glowWidths: [CelestialTier: CGFloat] = [
+            .dust: 5, .meteor: 6, .moon: 8, .planet: 10,
+            .gasGiant: 12, .star: 14, .blackHole: 22, .antimatter: 10
+        ]
+        active.glowWidth = glowWidths[tier] ?? 8
         setupBodyPhysics(node: active, tier: tier)
         
         activeBody = nil
