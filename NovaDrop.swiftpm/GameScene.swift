@@ -549,10 +549,10 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         lastUpdateTime = currentTime
         
         if let data = motionManager.accelerometerData {
-            let tiltThreshold: Double = 0.07
-            var dx = data.acceleration.x * 8.0
+            let tiltThreshold: Double = 0.08
+            var dx = data.acceleration.x * 3.5
             if abs(data.acceleration.x) < tiltThreshold { dx = 0 }
-            dx = max(-3.5, min(3.5, dx)) // Cap maximum horizontal gravity
+            dx = max(-1.5, min(1.5, dx)) // Cap maximum horizontal gravity tightly
             physicsWorld.gravity = CGVector(dx: CGFloat(dx), dy: -9.8)
         }
 
