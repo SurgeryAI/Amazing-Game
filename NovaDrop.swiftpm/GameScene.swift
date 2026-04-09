@@ -115,6 +115,15 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         
         // 15% chance to become an "unstable" orb
         if Int.random(in: 1...100) <= 15 {
+            // Immediate Visual Indicator
+            node.strokeColor = .red
+            node.glowWidth += 5
+            
+            let pulseIn = SKAction.scale(to: 0.93, duration: 0.2)
+            let pulseOut = SKAction.scale(to: 1.07, duration: 0.2)
+            let pulseSeq = SKAction.sequence([pulseIn, pulseOut])
+            node.run(SKAction.repeatForever(pulseSeq), withKey: "unstableWarning")
+            
             let waitDelay = SKAction.wait(forDuration: 3.0)
             let shakeLeft = SKAction.moveBy(x: -6, y: 0, duration: 0.05)
             let shakeRight = SKAction.moveBy(x: 12, y: 0, duration: 0.1)
@@ -271,9 +280,12 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     func dropActiveBody() {
         guard let active = activeBody else { return }
         active.removeAction(forKey: "unstableTimer") // Clear shaking timer if manually dropped
+        active.removeAction(forKey: "unstableWarning") // Stop warning pulse
+        active.setScale(1.0)
         
         active.alpha = 1.0
         let tier = CelestialTier(rawValue: active.userData?["tier"] as? Int ?? 0) ?? .dust
+        active.strokeColor = tier.glowColor
         setupBodyPhysics(node: active, tier: tier)
         
         activeBody = nil
