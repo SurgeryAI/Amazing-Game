@@ -145,8 +145,8 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         var polarity: Polarity = .neutral
         if !forceNeutral && tier != .blackHole && tier != .antimatter {
             let r = Int.random(in: 1...100)
-            if r <= 15 { polarity = .positive }
-            else if r <= 30 { polarity = .negative }
+            if r <= 25 { polarity = .positive }
+            else if r <= 50 { polarity = .negative }
         }
         
         node.fillColor = UIColor(tier.color)
