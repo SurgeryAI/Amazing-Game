@@ -71,6 +71,11 @@ struct ContentView: View {
                 GameOverView(score: score, highScore: highScore) {
                     showGameOver = false
                     gameScene.resetGame()
+                    
+                    // Show interstitial ad after a short delay to let the UI fade away
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        InterstitialAdManager.shared.showAd()
+                    }
                 }
             } else if showTutorial {
                 TutorialView {
@@ -82,6 +87,8 @@ struct ContentView: View {
             }
         }
         .onAppear {
+            _ = InterstitialAdManager.shared // Preload the interstitial ad
+            
             gameScene.onScoreChanged = { newScore in
                 self.score = newScore
                 if newScore > self.highScore {
