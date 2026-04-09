@@ -91,11 +91,12 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         if score > 300 && Int.random(in: 1...100) <= 3 {
             return .antimatter
         }
+        // maxRaw caps at Gas Giant (4); black hole (6) and antimatter (7) are
+        // excluded from normal drops so the maximum value never exceeds 4.
         var maxRaw = 2  // up to Moon by default
-        if score >= 500 { maxRaw = 4 }   // Gas Giant unlocked
+        if score >= 500 { maxRaw = 4 }      // Gas Giant unlocked
         else if score >= 200 { maxRaw = 3 } // Planet unlocked
-        let maxTier = min(maxRaw, 5) // Exclude black hole and antimatter from normal random
-        return CelestialTier(rawValue: Int.random(in: 0...maxTier)) ?? .dust
+        return CelestialTier(rawValue: Int.random(in: 0...maxRaw)) ?? .dust
     }
     
     func spawnActiveBody() {
@@ -167,12 +168,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         }
         
         node.lineWidth = 2
-
-        let glowWidths: [CelestialTier: CGFloat] = [
-            .dust: 5, .meteor: 6, .moon: 8, .planet: 10,
-            .gasGiant: 12, .star: 14, .blackHole: 22, .antimatter: 10
-        ]
-        node.glowWidth = glowWidths[tier] ?? 8
+        node.glowWidth = tier.standardGlowWidth
 
         if tier == .blackHole {
             node.fillColor = .black
@@ -320,7 +316,17 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         
         active.alpha = 1.0
         let tier = CelestialTier(rawValue: active.userData?["tier"] as? Int ?? 0) ?? .dust
-        active.strokeColor = tier.glowColor
+        let polarity = active.userData?["polarity"] as? Int ?? 0
+        // Unstable bodies have their stroke forced to .red; always restore the correct colour on drop.
+        if polarity == Polarity.positive.rawValue {
+            active.strokeColor = .cyan
+        } else if polarity == Polarity.negative.rawValue {
+            active.strokeColor = .orange
+        } else {
+            active.strokeColor = tier.glowColor
+        }
+        // Unstable bodies receive glowWidth += 5 in spawnActiveBody; reset to the standard value.
+        active.glowWidth = tier.standardGlowWidth
         setupBodyPhysics(node: active, tier: tier)
         
         activeBody = nil
@@ -379,23 +385,33 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     }
     
     func handleAntiMatterDestruction(nodeA: SKShapeNode, nodeB: SKShapeNode, contactPoint: CGPoint) {
+        let idA = nodeA.userData?["mergeId"] as? String ?? ""
+        let idB = nodeB.userData?["mergeId"] as? String ?? ""
+
         let radiusSquare: CGFloat = 120 * 120
         var cleared = 0
         let allNodes = playLayer.children.compactMap { $0 as? SKShapeNode }
         
         for node in allNodes {
             if node == activeBody { continue }
+            // Skip non-celestial props.
+            if node.userData?["isBounce"] as? Bool == true { continue }
             let dx = node.position.x - contactPoint.x
             let dy = node.position.y - contactPoint.y
             if dx*dx + dy*dy <= radiusSquare {
+                if let id = node.userData?["mergeId"] as? String { mergingIds.remove(id) }
                 node.removeFromParent()
                 cleared += 1
             }
         }
-        // nodeA and B are guaranteed to be in the radius if they collided, 
-        // but just in case they aren't in playLayer:
+        // nodeA and B are removed in the loop above (they are in playLayer),
+        // but guard against edge cases where they may have already been removed.
         if nodeA.parent != nil { nodeA.removeFromParent(); cleared += 1 }
         if nodeB.parent != nil { nodeB.removeFromParent(); cleared += 1 }
+
+        // Release the antimatter guard IDs.
+        mergingIds.remove(idA)
+        mergingIds.remove(idB)
         
         createExplosion(at: contactPoint, color: .red)
 
@@ -423,6 +439,10 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         pad.glowWidth = 8
         pad.position = location
         pad.zRotation = CGFloat.random(in: -0.4...0.4)
+        // Mark as a non-celestial prop so the overflow check skips it.
+        let padData = NSMutableDictionary()
+        padData["isBounce"] = true
+        pad.userData = padData
         
         pad.physicsBody = SKPhysicsBody(rectangleOf: CGSize(width: 80, height: 15))
         pad.physicsBody?.isDynamic = false 
@@ -467,6 +487,9 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         playHaptic(for: tier)
 
         guard let nextTier = tier.nextTier else {
+            // Black hole — no further merge possible; IDs are no longer needed.
+            mergingIds.remove(idA)
+            mergingIds.remove(idB)
             return
         }
 
@@ -475,6 +498,10 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         playLayer.addChild(newNode)
 
         setupBodyPhysics(node: newNode, tier: nextTier)
+
+        // Clean up merge-guard IDs now that the merge is fully processed.
+        mergingIds.remove(idA)
+        mergingIds.remove(idB)
     }
 
     func showComboLabel(multiplier: Int, at position: CGPoint) {
@@ -665,8 +692,10 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         
         for child in playLayer.children {
             if child == activeBody { continue }
-            
-            let tier = CelestialTier(rawValue: child.userData?["tier"] as? Int ?? 0) ?? .dust
+            // Skip non-celestial props (e.g. bounce pads) — they have no tier.
+            if child.userData?["isBounce"] as? Bool == true { continue }
+            guard let tierRaw = child.userData?["tier"] as? Int,
+                  let tier = CelestialTier(rawValue: tierRaw) else { continue }
             let topEdge = child.position.y + tier.radius
             
             if topEdge > topY + 10 {

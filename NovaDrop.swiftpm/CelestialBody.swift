@@ -83,6 +83,19 @@ enum CelestialTier: Int, CaseIterable {
         return Int(pow(2.0, Double(self.rawValue))) * 10
     }
 
+    var standardGlowWidth: CGFloat {
+        switch self {
+        case .dust:      return 5
+        case .meteor:    return 6
+        case .moon:      return 8
+        case .planet:    return 10
+        case .gasGiant:  return 12
+        case .star:      return 14
+        case .blackHole: return 22
+        case .antimatter: return 10
+        }
+    }
+
     var nextTier: CelestialTier? {
         if self == .blackHole || self == .antimatter { return nil }
         return CelestialTier(rawValue: self.rawValue + 1)
