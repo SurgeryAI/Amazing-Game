@@ -139,11 +139,13 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
     
-    func createBodyNode(tier: CelestialTier, forceNeutral: Bool = false) -> SKShapeNode {
+    func createBodyNode(tier: CelestialTier, forcePolarity: Polarity? = nil) -> SKShapeNode {
         let node = SKShapeNode(circleOfRadius: tier.radius)
         
         var polarity: Polarity = .neutral
-        if !forceNeutral && tier != .blackHole && tier != .antimatter {
+        if let forced = forcePolarity {
+            polarity = forced
+        } else if tier != .blackHole && tier != .antimatter {
             let r = Int.random(in: 1...100)
             if r <= 25 { polarity = .positive }
             else if r <= 50 { polarity = .negative }
@@ -351,7 +353,15 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
             if !isSameMagnetic {
                 mergingIds.insert(idA)
                 mergingIds.insert(idB)
-                handleMerge(nodeA: a, nodeB: b, tier: tier, contactPoint: contact.contactPoint)
+                
+                var resultingPolarity: Polarity = .neutral
+                if polA != 0 && polB == 0 {
+                    resultingPolarity = Polarity(rawValue: polA) ?? .neutral
+                } else if polB != 0 && polA == 0 {
+                    resultingPolarity = Polarity(rawValue: polB) ?? .neutral
+                }
+                
+                handleMerge(nodeA: a, nodeB: b, tier: tier, contactPoint: contact.contactPoint, resultingPolarity: resultingPolarity)
             }
         }
     }
@@ -417,7 +427,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         ]))
     }
     
-    func handleMerge(nodeA: SKShapeNode, nodeB: SKShapeNode, tier: CelestialTier, contactPoint: CGPoint) {
+    func handleMerge(nodeA: SKShapeNode, nodeB: SKShapeNode, tier: CelestialTier, contactPoint: CGPoint, resultingPolarity: Polarity = .neutral) {
         let idA = nodeA.userData?["mergeId"] as? String ?? ""
         let idB = nodeB.userData?["mergeId"] as? String ?? ""
 
@@ -448,7 +458,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
             return
         }
 
-        let newNode = createBodyNode(tier: nextTier, forceNeutral: true)
+        let newNode = createBodyNode(tier: nextTier, forcePolarity: resultingPolarity)
         newNode.position = contactPoint
         playLayer.addChild(newNode)
 
