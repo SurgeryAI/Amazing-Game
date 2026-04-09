@@ -12,7 +12,7 @@ struct BannerView: UIViewRepresentable {
         // Replace with your actual Production Banner Ad Unit ID before shipping.
         // The compiler warning below will remind you if this placeholder is still present.
         #warning("Replace YOUR_PRODUCTION_AD_UNIT_ID with your real AdMob banner unit ID before release.")
-        banner.adUnitID = "YOUR_PRODUCTION_AD_UNIT_ID"
+        banner.adUnitID = "ca-app-pub-6432429930581606/6568763063"
         #endif
         
         if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
