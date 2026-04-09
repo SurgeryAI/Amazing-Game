@@ -112,6 +112,22 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         node.alpha = 0.5
         playLayer.addChild(node)
         activeBody = node
+        
+        // 15% chance to become an "unstable" orb
+        if Int.random(in: 1...100) <= 15 {
+            let waitDelay = SKAction.wait(forDuration: 3.0)
+            let shakeLeft = SKAction.moveBy(x: -6, y: 0, duration: 0.05)
+            let shakeRight = SKAction.moveBy(x: 12, y: 0, duration: 0.1)
+            let shakeCenter = SKAction.moveBy(x: -6, y: 0, duration: 0.05)
+            let shakeSequence = SKAction.sequence([shakeLeft, shakeRight, shakeCenter])
+            let shakeLoop = SKAction.repeat(shakeSequence, count: 15) // Shake for 1.5 seconds
+            
+            let forceDrop = SKAction.run { [weak self] in
+                self?.dropActiveBody()
+            }
+            
+            node.run(SKAction.sequence([waitDelay, shakeLoop, forceDrop]), withKey: "unstableTimer")
+        }
     }
     
     func createBodyNode(tier: CelestialTier) -> SKShapeNode {
@@ -254,6 +270,8 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     
     func dropActiveBody() {
         guard let active = activeBody else { return }
+        active.removeAction(forKey: "unstableTimer") // Clear shaking timer if manually dropped
+        
         active.alpha = 1.0
         let tier = CelestialTier(rawValue: active.userData?["tier"] as? Int ?? 0) ?? .dust
         setupBodyPhysics(node: active, tier: tier)
