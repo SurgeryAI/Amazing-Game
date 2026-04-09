@@ -9,8 +9,8 @@ struct BannerView: UIViewRepresentable {
         // Google Official Test Ad Unit ID for Banners guarantees no false-click bans
         banner.adUnitID = "ca-app-pub-3940256099942544/2934735716"
         #else
-        // REPLACEME: Your actual Production Banner Ad Unit ID
-        banner.adUnitID = "ca-app-pub-3940256099942544/2934735716"
+        // TODO: Replace with your actual Production Banner Ad Unit ID before shipping.
+        banner.adUnitID = "YOUR_PRODUCTION_AD_UNIT_ID"
         #endif
         
         if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
