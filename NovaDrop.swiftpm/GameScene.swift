@@ -88,7 +88,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     }
     
     func randomStartTier() -> CelestialTier {
-        if score > 100 && Int.random(in: 1...100) <= 8 {
+        if score > 300 && Int.random(in: 1...100) <= 3 {
             return .antimatter
         }
         var maxRaw = 2  // up to Moon by default
@@ -476,9 +476,10 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         lastUpdateTime = currentTime
         
         if let data = motionManager.accelerometerData {
-            let tiltThreshold: Double = 0.05
-            var dx = data.acceleration.x * 20.0
+            let tiltThreshold: Double = 0.07
+            var dx = data.acceleration.x * 8.0
             if abs(data.acceleration.x) < tiltThreshold { dx = 0 }
+            dx = max(-3.5, min(3.5, dx)) // Cap maximum horizontal gravity
             physicsWorld.gravity = CGVector(dx: CGFloat(dx), dy: -9.8)
         }
 
