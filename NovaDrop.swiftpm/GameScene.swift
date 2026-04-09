@@ -252,6 +252,17 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
                 SKAction.rotate(byAngle: .pi * 2, duration: 5.0)))
             node.addChild(disk)
         }
+        // Visual overlay for Polarity
+        if polarity == .positive || polarity == .negative {
+            let symbolNode = SKLabelNode(text: polarity == .positive ? "+" : "-")
+            symbolNode.fontName = "AvenirNext-Bold"
+            symbolNode.fontSize = max(16, tier.radius * 1.2) // Scale font size based on radius
+            symbolNode.fontColor = UIColor(white: 1.0, alpha: 0.85)
+            symbolNode.horizontalAlignmentMode = .center
+            symbolNode.verticalAlignmentMode = .center
+            symbolNode.zPosition = 5
+            node.addChild(symbolNode)
+        }
 
         node.name = "tier_\(tier.rawValue)"
         let userData = NSMutableDictionary()
