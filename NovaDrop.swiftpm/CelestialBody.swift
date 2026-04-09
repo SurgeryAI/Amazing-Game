@@ -9,6 +9,7 @@ enum CelestialTier: Int, CaseIterable {
     case gasGiant
     case star
     case blackHole
+    case antimatter
 
     var radius: CGFloat {
         switch self {
@@ -19,6 +20,7 @@ enum CelestialTier: Int, CaseIterable {
         case .gasGiant: return 58
         case .star: return 80
         case .blackHole: return 110
+        case .antimatter: return 20
         }
     }
 
@@ -31,6 +33,7 @@ enum CelestialTier: Int, CaseIterable {
         case .gasGiant: return 16.0
         case .star: return 32.0
         case .blackHole: return 64.0
+        case .antimatter: return 5.0
         }
     }
 
@@ -43,6 +46,7 @@ enum CelestialTier: Int, CaseIterable {
         case .gasGiant: return Color(uiColor: .systemPurple)
         case .star: return Color(uiColor: .systemYellow)
         case .blackHole: return Color(uiColor: .black)
+        case .antimatter: return Color(uiColor: .systemRed)
         }
     }
     
@@ -64,14 +68,17 @@ enum CelestialTier: Int, CaseIterable {
         case .gasGiant: return .magenta
         case .star: return .yellow
         case .blackHole: return .purple
+        case .antimatter: return .red
         }
     }
 
     var scoreValue: Int {
+        if self == .antimatter { return 0 }
         return Int(pow(2.0, Double(self.rawValue))) * 10
     }
 
     var nextTier: CelestialTier? {
+        if self == .blackHole || self == .antimatter { return nil }
         return CelestialTier(rawValue: self.rawValue + 1)
     }
 }

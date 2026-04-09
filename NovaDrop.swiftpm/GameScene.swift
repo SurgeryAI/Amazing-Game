@@ -1,5 +1,6 @@
 import SpriteKit
 import CoreHaptics
+import CoreMotion
 
 class GameScene: SKScene, SKPhysicsContactDelegate {
     
@@ -10,6 +11,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     }
     
     var hapticEngine: CHHapticEngine?
+    var motionManager = CMMotionManager()
     
     var onScoreChanged: ((Int) -> Void)?
     var onGameOver: (() -> Void)?
@@ -41,6 +43,12 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         physicsWorld.gravity = CGVector(dx: 0, dy: -9.8)
         physicsWorld.contactDelegate = self
         setupHaptics()
+        
+        if motionManager.isAccelerometerAvailable {
+            motionManager.accelerometerUpdateInterval = 0.1
+            motionManager.startAccelerometerUpdates()
+        }
+        
         buildEnvironment()
         spawnActiveBody()
     }
@@ -80,10 +88,13 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     }
     
     func randomStartTier() -> CelestialTier {
+        if score > 100 && Int.random(in: 1...100) <= 8 {
+            return .antimatter
+        }
         var maxRaw = 2  // up to Moon by default
         if score >= 500 { maxRaw = 4 }   // Gas Giant unlocked
         else if score >= 200 { maxRaw = 3 } // Planet unlocked
-        let maxTier = min(maxRaw, CelestialTier.allCases.count - 1)
+        let maxTier = min(maxRaw, 5) // Exclude black hole and antimatter from normal random
         return CelestialTier(rawValue: Int.random(in: 0...maxTier)) ?? .dust
     }
     
@@ -109,15 +120,21 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         node.strokeColor = tier.glowColor
         node.lineWidth = 2
 
-        // Scale glow width with tier so larger bodies feel more dramatic
         let glowWidths: [CelestialTier: CGFloat] = [
             .dust: 5, .meteor: 6, .moon: 8, .planet: 10,
-            .gasGiant: 12, .star: 14, .blackHole: 22
+            .gasGiant: 12, .star: 14, .blackHole: 22, .antimatter: 10
         ]
         node.glowWidth = glowWidths[tier] ?? 8
 
         if tier == .blackHole {
             node.fillColor = .black
+        }
+        
+        if tier == .antimatter {
+            node.fillColor = UIColor(white: 0.1, alpha: 1.0)
+            let pulseIn = SKAction.scale(to: 0.8, duration: 0.5)
+            let pulseOut = SKAction.scale(to: 1.2, duration: 0.5)
+            node.run(SKAction.repeatForever(SKAction.sequence([pulseIn, pulseOut])))
         }
 
         // Inner rim lighting — a slightly smaller ring painted with the glow
@@ -138,7 +155,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         let highlightAlpha: CGFloat = 0.45
         let highlightOffsetX: CGFloat = -0.26   // fraction of radius, left of centre
         let highlightOffsetY: CGFloat = 0.27    // fraction of radius, above centre
-        if tier != .blackHole {
+        if tier != .blackHole && tier != .antimatter {
             let highlight = SKShapeNode(circleOfRadius: tier.radius * highlightRadiusScale)
             highlight.fillColor = UIColor(white: 1.0, alpha: highlightAlpha)
             highlight.strokeColor = .clear
@@ -261,13 +278,40 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         let tierAValue = a.userData?["tier"] as? Int ?? -1
         let tierBValue = b.userData?["tier"] as? Int ?? -2
         
+        let idA = a.userData?["mergeId"] as? String ?? ""
+        let idB = b.userData?["mergeId"] as? String ?? ""
+        
+        guard !mergingIds.contains(idA), !mergingIds.contains(idB) else { return }
+        
+        if tierAValue == CelestialTier.antimatter.rawValue || tierBValue == CelestialTier.antimatter.rawValue {
+            mergingIds.insert(idA)
+            mergingIds.insert(idB)
+            handleAntiMatterDestruction(nodeA: a, nodeB: b, contactPoint: contact.contactPoint)
+            return
+        }
+        
         if tierAValue == tierBValue, let tier = CelestialTier(rawValue: tierAValue) {
-            let idA = a.userData?["mergeId"] as? String ?? ""
-            let idB = b.userData?["mergeId"] as? String ?? ""
-            guard !mergingIds.contains(idA), !mergingIds.contains(idB) else { return }
             mergingIds.insert(idA)
             mergingIds.insert(idB)
             handleMerge(nodeA: a, nodeB: b, tier: tier, contactPoint: contact.contactPoint)
+        }
+    }
+    
+    func handleAntiMatterDestruction(nodeA: SKShapeNode, nodeB: SKShapeNode, contactPoint: CGPoint) {
+        nodeA.removeFromParent()
+        nodeB.removeFromParent()
+        createExplosion(at: contactPoint, color: .red)
+
+        if CHHapticEngine.capabilitiesForHardware().supportsHaptics {
+            let event = CHHapticEvent(eventType: .hapticTransient, parameters: [
+                CHHapticEventParameter(parameterID: .hapticIntensity, value: 1.0),
+                CHHapticEventParameter(parameterID: .hapticSharpness, value: 1.0)
+            ], relativeTime: 0)
+            do {
+                let pattern = try CHHapticPattern(events: [event], parameters: [])
+                let player = try hapticEngine?.makePlayer(with: pattern)
+                try player?.start(atTime: 0)
+            } catch { }
         }
     }
     
@@ -428,6 +472,13 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         if lastUpdateTime == 0 { lastUpdateTime = currentTime }
         let dt = currentTime - lastUpdateTime
         lastUpdateTime = currentTime
+        
+        if let data = motionManager.accelerometerData {
+            let tiltThreshold: Double = 0.05
+            var dx = data.acceleration.x * 20.0
+            if abs(data.acceleration.x) < tiltThreshold { dx = 0 }
+            physicsWorld.gravity = CGVector(dx: CGFloat(dx), dy: -9.8)
+        }
 
         // Black Hole Gravity Well: attract nearby bodies toward each black hole
         let allNodes = playLayer.children.compactMap { $0 as? SKShapeNode }
@@ -476,5 +527,9 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         } else {
             gameOverTimer = 0.0
         }
+    }
+    
+    deinit {
+        motionManager.stopAccelerometerUpdates()
     }
 }
