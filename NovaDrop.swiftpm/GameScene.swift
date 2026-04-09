@@ -425,6 +425,8 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
             intensity = 0.8; sharpness = 0.6
         case .blackHole:
             intensity = 1.0; sharpness = 1.0
+        case .antimatter:
+            intensity = 1.0; sharpness = 1.0
         }
         
         let event = CHHapticEvent(
