@@ -1,6 +1,12 @@
 import SwiftUI
 import SpriteKit
 
+enum Polarity: Int {
+    case neutral = 0
+    case positive = 1
+    case negative = 2
+}
+
 enum CelestialTier: Int, CaseIterable {
     case dust = 0
     case meteor

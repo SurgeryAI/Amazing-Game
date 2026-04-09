@@ -139,10 +139,30 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
     
-    func createBodyNode(tier: CelestialTier) -> SKShapeNode {
+    func createBodyNode(tier: CelestialTier, forceNeutral: Bool = false) -> SKShapeNode {
         let node = SKShapeNode(circleOfRadius: tier.radius)
+        
+        var polarity: Polarity = .neutral
+        if !forceNeutral && tier != .blackHole && tier != .antimatter {
+            let r = Int.random(in: 1...100)
+            if r <= 15 { polarity = .positive }
+            else if r <= 30 { polarity = .negative }
+        }
+        
         node.fillColor = UIColor(tier.color)
-        node.strokeColor = tier.glowColor
+        
+        let effectiveGlowColor: UIColor
+        if polarity == .positive {
+            effectiveGlowColor = .cyan
+            node.strokeColor = effectiveGlowColor
+        } else if polarity == .negative {
+            effectiveGlowColor = .orange
+            node.strokeColor = effectiveGlowColor
+        } else {
+            effectiveGlowColor = tier.glowColor
+            node.strokeColor = effectiveGlowColor
+        }
+        
         node.lineWidth = 2
 
         let glowWidths: [CelestialTier: CGFloat] = [
@@ -169,7 +189,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         let rimLineWidthScale: CGFloat = 0.18   // thick enough to fill toward the edge
         let rimNode = SKShapeNode(circleOfRadius: tier.radius * rimRadiusScale)
         rimNode.fillColor = .clear
-        rimNode.strokeColor = tier.glowColor.withAlphaComponent(rimAlpha)
+        rimNode.strokeColor = effectiveGlowColor.withAlphaComponent(rimAlpha)
         rimNode.lineWidth = tier.radius * rimLineWidthScale
         rimNode.zPosition = 1
         node.addChild(rimNode)
@@ -235,6 +255,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         let userData = NSMutableDictionary()
         userData["tier"] = tier.rawValue
         userData["mergeId"] = UUID().uuidString
+        userData["polarity"] = polarity.rawValue
         node.userData = userData
         
         return node
@@ -321,9 +342,17 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         }
         
         if tierAValue == tierBValue, let tier = CelestialTier(rawValue: tierAValue) {
-            mergingIds.insert(idA)
-            mergingIds.insert(idB)
-            handleMerge(nodeA: a, nodeB: b, tier: tier, contactPoint: contact.contactPoint)
+            let polA = a.userData?["polarity"] as? Int ?? 0
+            let polB = b.userData?["polarity"] as? Int ?? 0
+            
+            // Positive-Positive and Negative-Negative repel and DO NOT merge
+            let isSameMagnetic = (polA == 1 && polB == 1) || (polA == 2 && polB == 2)
+            
+            if !isSameMagnetic {
+                mergingIds.insert(idA)
+                mergingIds.insert(idB)
+                handleMerge(nodeA: a, nodeB: b, tier: tier, contactPoint: contact.contactPoint)
+            }
         }
     }
     
@@ -419,7 +448,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
             return
         }
 
-        let newNode = createBodyNode(tier: nextTier)
+        let newNode = createBodyNode(tier: nextTier, forceNeutral: true)
         newNode.position = contactPoint
         playLayer.addChild(newNode)
 
@@ -577,6 +606,35 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
                     let force = CGVector(dx: diff.dx / dist * scale,
                                         dy: diff.dy / dist * scale)
                     pb.applyForce(force)
+                }
+            }
+        }
+        
+        // Magnetic Polarity Forces
+        if allNodes.count > 1 {
+            for i in 0..<(allNodes.count - 1) {
+                let nodeA = allNodes[i]
+                guard let polA = nodeA.userData?["polarity"] as? Int, polA != Polarity.neutral.rawValue, let pbA = nodeA.physicsBody else { continue }
+                
+                for j in (i+1)..<allNodes.count {
+                    let nodeB = allNodes[j]
+                    guard let polB = nodeB.userData?["polarity"] as? Int, polB != Polarity.neutral.rawValue, let pbB = nodeB.physicsBody else { continue }
+                    
+                    let dx = nodeB.position.x - nodeA.position.x
+                    let dy = nodeB.position.y - nodeA.position.y
+                    let distSq = dx*dx + dy*dy
+                    let magRadiusSq: CGFloat = 130 * 130
+                    
+                    if distSq > 1 && distSq < magRadiusSq {
+                        let dist = sqrt(distSq)
+                        let scaleBase: CGFloat = 200 * (1 - dist / 130)
+                        let isOpposite = (polA != polB)
+                        let forceMagn = isOpposite ? scaleBase : -scaleBase * 1.5 // repel is stronger
+                        
+                        let force = CGVector(dx: (dx / dist) * forceMagn, dy: (dy / dist) * forceMagn)
+                        pbA.applyForce(CGVector(dx: force.dx, dy: force.dy))
+                        pbB.applyForce(CGVector(dx: -force.dx, dy: -force.dy))
+                    }
                 }
             }
         }
