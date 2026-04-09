@@ -298,9 +298,29 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     }
     
     func handleAntiMatterDestruction(nodeA: SKShapeNode, nodeB: SKShapeNode, contactPoint: CGPoint) {
-        nodeA.removeFromParent()
-        nodeB.removeFromParent()
+        let radiusSquare: CGFloat = 120 * 120
+        var cleared = 0
+        let allNodes = playLayer.children.compactMap { $0 as? SKShapeNode }
+        
+        for node in allNodes {
+            if node == activeBody { continue }
+            let dx = node.position.x - contactPoint.x
+            let dy = node.position.y - contactPoint.y
+            if dx*dx + dy*dy <= radiusSquare {
+                node.removeFromParent()
+                cleared += 1
+            }
+        }
+        // nodeA and B are guaranteed to be in the radius if they collided, 
+        // but just in case they aren't in playLayer:
+        if nodeA.parent != nil { nodeA.removeFromParent(); cleared += 1 }
+        if nodeB.parent != nil { nodeB.removeFromParent(); cleared += 1 }
+        
         createExplosion(at: contactPoint, color: .red)
+
+        if cleared >= 4 {
+            spawnBouncePad(at: contactPoint)
+        }
 
         if CHHapticEngine.capabilitiesForHardware().supportsHaptics {
             let event = CHHapticEvent(eventType: .hapticTransient, parameters: [
@@ -313,6 +333,29 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
                 try player?.start(atTime: 0)
             } catch { }
         }
+    }
+    
+    func spawnBouncePad(at location: CGPoint) {
+        let pad = SKShapeNode(rectOf: CGSize(width: 80, height: 15), cornerRadius: 5)
+        pad.fillColor = .init(white: 0.9, alpha: 1.0)
+        pad.strokeColor = .green
+        pad.glowWidth = 8
+        pad.position = location
+        pad.zRotation = CGFloat.random(in: -0.4...0.4)
+        
+        pad.physicsBody = SKPhysicsBody(rectangleOf: CGSize(width: 80, height: 15))
+        pad.physicsBody?.isDynamic = false 
+        pad.physicsBody?.restitution = 1.3 
+        pad.physicsBody?.friction = 0.2
+        pad.physicsBody?.categoryBitMask = PhysicsCategory.wall
+        
+        playLayer.addChild(pad)
+        
+        pad.run(SKAction.sequence([
+            SKAction.wait(forDuration: 12.0),
+            SKAction.fadeOut(withDuration: 1.0),
+            SKAction.removeFromParent()
+        ]))
     }
     
     func handleMerge(nodeA: SKShapeNode, nodeB: SKShapeNode, tier: CelestialTier, contactPoint: CGPoint) {
