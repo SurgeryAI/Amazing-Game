@@ -180,37 +180,49 @@ struct TutorialView: View {
         ZStack {
             Color.black.opacity(0.8).ignoresSafeArea()
             
-            VStack(spacing: 25) {
-                Text("HOW TO PLAY")
-                    .font(.system(size: 32, weight: .black))
-                    .foregroundColor(.white)
-                
-                VStack(alignment: .leading, spacing: 20) {
-                    HStack(alignment: .top) {
-                        Image(systemName: "hand.point.up.left.fill")
-                            .foregroundColor(.cyan)
-                            .font(.title)
-                        Text("1. Tap and drag left or right at the top of the screen to aim your celestial body, then release to drop it.")
+            VStack(spacing: 0) {
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(spacing: 25) {
+                        Text("HOW TO PLAY")
+                            .font(.system(size: 32, weight: .black))
                             .foregroundColor(.white)
+                        
+                        VStack(alignment: .leading, spacing: 20) {
+                            HStack(alignment: .top) {
+                                Image(systemName: "hand.point.up.left.fill")
+                                    .foregroundColor(.cyan)
+                                    .font(.title)
+                                    .frame(width: 36)
+                                Text("1. Tap and drag left or right at the top of the screen to aim your celestial body, then release to drop it.")
+                                    .foregroundColor(.white)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            
+                            HStack(alignment: .top) {
+                                Image(systemName: "sparkles")
+                                    .foregroundColor(.yellow)
+                                    .font(.title)
+                                    .frame(width: 36)
+                                Text("2. When two identical bodies touch (like two Moons), they merge into a bigger, heavier body and you gain points!")
+                                    .foregroundColor(.white)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            
+                            HStack(alignment: .top) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundColor(.red)
+                                    .font(.title)
+                                    .frame(width: 36)
+                                Text("3. Don't let your universe fill up! If objects pile up past the faint line at the top, the cosmos overflows and the game is over.")
+                                    .foregroundColor(.white)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .padding()
                     }
-                    
-                    HStack(alignment: .top) {
-                        Image(systemName: "sparkles")
-                            .foregroundColor(.yellow)
-                            .font(.title)
-                        Text("2. When two identical bodies touch (like two Moons), they merge into a bigger, heavier body and you gain points!")
-                            .foregroundColor(.white)
-                    }
-                    
-                    HStack(alignment: .top) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundColor(.red)
-                            .font(.title)
-                        Text("3. Don't let your universe fill up! If objects pile up past the faint line at the top, the cosmos overflows and the game is over.")
-                            .foregroundColor(.white)
-                    }
+                    .padding(.top, 30)
+                    .padding(.horizontal, 30)
                 }
-                .padding()
                 
                 Button(action: onDismiss) {
                     Text("GOT IT! LET'S PLAY")
@@ -224,8 +236,10 @@ struct TutorialView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 15))
                 }
                 .padding(.horizontal, 20)
+                .padding(.bottom, 30)
+                .padding(.top, 10)
             }
-            .padding(30)
+            .frame(maxHeight: UIScreen.main.bounds.height * 0.75)
             .background(BlurView(style: .systemMaterialDark))
             .clipShape(RoundedRectangle(cornerRadius: 25))
             .shadow(color: .purple.opacity(0.3), radius: 20, x: 0, y: 0)
