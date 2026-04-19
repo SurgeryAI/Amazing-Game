@@ -25,14 +25,14 @@ class ScoreManager: ObservableObject {
         // --- All-time ---
         allTimeTop3.append(score)
         allTimeTop3.sort(by: >)
-        if allTimeTop3.count > 3 { allTimeTop3 = Array(allTimeTop3.prefix(3)) }
+        allTimeTop3 = Array(allTimeTop3.prefix(3))
         UserDefaults.standard.set(allTimeTop3, forKey: allTimeKey)
         
         // --- Today ---
-        refreshDailyIfNeeded()
+        resetDailyIfNewDay()
         todayTop3.append(score)
         todayTop3.sort(by: >)
-        if todayTop3.count > 3 { todayTop3 = Array(todayTop3.prefix(3)) }
+        todayTop3 = Array(todayTop3.prefix(3))
         UserDefaults.standard.set(todayTop3, forKey: dailyScoresKey)
     }
     
@@ -50,20 +50,28 @@ class ScoreManager: ObservableObject {
             }
         }
         
-        refreshDailyIfNeeded()
-    }
-    
-    /// Resets today's scores if the stored date is not today.
-    private func refreshDailyIfNeeded() {
+        // Load today's scores from disk (only at launch)
         let today = dateString(for: Date())
         let stored = UserDefaults.standard.string(forKey: dailyDateKey) ?? ""
         
         if stored == today {
             todayTop3 = (UserDefaults.standard.array(forKey: dailyScoresKey) as? [Int]) ?? []
         } else {
-            // New day — clear daily scores
+            // New day — start fresh
             todayTop3 = []
             UserDefaults.standard.set(todayTop3, forKey: dailyScoresKey)
+            UserDefaults.standard.set(today, forKey: dailyDateKey)
+        }
+    }
+    
+    /// If the calendar day has changed since the last score, clear daily scores.
+    /// Does NOT re-read from UserDefaults — in-memory state is authoritative.
+    private func resetDailyIfNewDay() {
+        let today = dateString(for: Date())
+        let stored = UserDefaults.standard.string(forKey: dailyDateKey) ?? ""
+        
+        if stored != today {
+            todayTop3 = []
             UserDefaults.standard.set(today, forKey: dailyDateKey)
         }
     }
