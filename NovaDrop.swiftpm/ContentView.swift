@@ -5,7 +5,7 @@ struct ContentView: View {
     @State private var score: Int = 0
     @State private var showGameOver: Bool = false
     @State private var showTutorial: Bool = !UserDefaults.standard.bool(forKey: "HasSeenTutorial")
-    @State private var highScore: Int = UserDefaults.standard.integer(forKey: "HighScore")
+    @StateObject private var scoreManager = ScoreManager.shared
     @State private var nextTier: CelestialTier = .dust
     
     @State private var gameScene: GameScene = {
@@ -48,7 +48,7 @@ struct ContentView: View {
                         Text("BEST")
                             .font(.headline)
                             .foregroundColor(.gray)
-                        Text("\(highScore)")
+                        Text("\(scoreManager.bestScore)")
                             .font(.system(size: 24, weight: .semibold, design: .rounded))
                             .foregroundColor(.white)
                     }
@@ -68,7 +68,7 @@ struct ContentView: View {
             }
             
             if showGameOver {
-                GameOverView(score: score, highScore: highScore) {
+                GameOverView(score: score, scoreManager: scoreManager) {
                     showGameOver = false
                     gameScene.resetGame()
                     
@@ -91,12 +91,9 @@ struct ContentView: View {
             
             gameScene.onScoreChanged = { newScore in
                 self.score = newScore
-                if newScore > self.highScore {
-                    self.highScore = newScore
-                    UserDefaults.standard.set(newScore, forKey: "HighScore")
-                }
             }
             gameScene.onGameOver = {
+                scoreManager.submitScore(self.score)
                 withAnimation {
                     self.showGameOver = true
                 }
@@ -111,37 +108,68 @@ struct ContentView: View {
 
 struct GameOverView: View {
     let score: Int
-    let highScore: Int
+    @ObservedObject var scoreManager: ScoreManager
     let onRetry: () -> Void
+    
+    private let medals = ["🥇", "🥈", "🥉"]
     
     var body: some View {
         ZStack {
             Color.black.opacity(0.8).ignoresSafeArea()
             
-            VStack(spacing: 20) {
-                Text("COSMOS FULL")
-                    .font(.system(size: 40, weight: .black))
-                    .foregroundColor(.white)
-                
-                HStack(spacing: 40) {
-                    VStack {
-                        Text("Score")
-                            .foregroundColor(.gray)
+            VStack(spacing: 0) {
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(spacing: 18) {
+                        Text("COSMOS FULL")
+                            .font(.system(size: 36, weight: .black))
+                            .foregroundColor(.white)
+                        
+                        // Current score
                         Text("\(score)")
-                            .font(.title)
-                            .bold()
-                            .foregroundColor(.white)
+                            .font(.system(size: 48, weight: .heavy, design: .rounded))
+                            .foregroundStyle(
+                                LinearGradient(colors: [.cyan, .purple], startPoint: .leading, endPoint: .trailing)
+                            )
+                        
+                        if score == scoreManager.allTimeTop3.first ?? 0, score > 0 {
+                            Text("🎉 NEW ALL-TIME BEST!")
+                                .font(.subheadline.weight(.heavy))
+                                .foregroundColor(.yellow)
+                        }
+                        
+                        // Leaderboard columns
+                        HStack(alignment: .top, spacing: 16) {
+                            // All-Time
+                            leaderboardColumn(
+                                title: "ALL-TIME",
+                                icon: "crown.fill",
+                                iconColor: .yellow,
+                                scores: scoreManager.allTimeTop3
+                            )
+                            
+                            // Divider
+                            Rectangle()
+                                .fill(Color.white.opacity(0.15))
+                                .frame(width: 1)
+                                .padding(.vertical, 4)
+                            
+                            // Today
+                            leaderboardColumn(
+                                title: "TODAY",
+                                icon: "sun.max.fill",
+                                iconColor: .orange,
+                                scores: scoreManager.todayTop3
+                            )
+                        }
+                        .padding()
+                        .background(
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(Color.white.opacity(0.06))
+                        )
                     }
-                    VStack {
-                        Text("Best")
-                            .foregroundColor(.gray)
-                        Text("\(highScore)")
-                            .font(.title)
-                            .bold()
-                            .foregroundColor(.white)
-                    }
+                    .padding(.top, 24)
+                    .padding(.horizontal, 24)
                 }
-                .padding()
                 
                 Button(action: onRetry) {
                     Text("TRY AGAIN")
@@ -154,14 +182,50 @@ struct GameOverView: View {
                         )
                         .clipShape(RoundedRectangle(cornerRadius: 15))
                 }
-                .padding(.horizontal, 40)
+                .padding(.horizontal, 30)
+                .padding(.bottom, 24)
+                .padding(.top, 12)
             }
-            .padding(30)
+            .frame(maxHeight: UIScreen.main.bounds.height * 0.70)
             .background(BlurView(style: .systemMaterialDark))
             .clipShape(RoundedRectangle(cornerRadius: 25))
             .shadow(color: .purple.opacity(0.5), radius: 20, x: 0, y: 0)
             .padding(20)
         }
+    }
+    
+    @ViewBuilder
+    private func leaderboardColumn(title: String, icon: String, iconColor: Color, scores: [Int]) -> some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .foregroundColor(iconColor)
+                    .font(.caption)
+                Text(title)
+                    .font(.caption.weight(.heavy))
+                    .foregroundColor(.gray)
+            }
+            
+            if scores.isEmpty {
+                Text("—")
+                    .font(.title3)
+                    .foregroundColor(.gray.opacity(0.5))
+                    .frame(maxWidth: .infinity)
+            } else {
+                ForEach(Array(scores.enumerated()), id: \.offset) { index, s in
+                    HStack {
+                        Text(medals[index])
+                            .font(.body)
+                        Spacer()
+                        Text("\(s)")
+                            .font(.system(size: 18, weight: .bold, design: .rounded))
+                            .foregroundColor(index == 0 ? .white : .white.opacity(0.7))
+                    }
+                    .padding(.horizontal, 6)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 
