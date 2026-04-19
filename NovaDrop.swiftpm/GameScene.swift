@@ -613,9 +613,11 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         lastUpdateTime = 0.0
         comboCount = 0
         lastMergeTime = 0
+        activeBody = nil
         currentNextTier = randomStartTier()
         mergingIds.removeAll()
         playLayer.removeAllChildren()
+        removeAllActions()       // Clear any pending spawn/drop actions from the previous round
         spawnActiveBody()
     }
 

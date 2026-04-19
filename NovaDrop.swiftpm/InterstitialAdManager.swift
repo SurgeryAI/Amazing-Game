@@ -33,6 +33,12 @@ class InterstitialAdManager: NSObject, GADFullScreenContentDelegate, ObservableO
     }
     
     func showAd() {
+        // Only show an ad ~2/3 of the time
+        guard Int.random(in: 0..<3) < 2 else {
+            print("Ad skipped this round (1-in-3 chance)")
+            return
+        }
+        
         guard let interstitial = interstitial else {
             print("Ad wasn't ready")
             loadAd() // Try to load it for next time if it failed
