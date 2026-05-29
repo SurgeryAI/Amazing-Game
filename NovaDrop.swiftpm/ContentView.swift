@@ -7,6 +7,10 @@ struct ContentView: View {
     @State private var showTutorial: Bool = !UserDefaults.standard.bool(forKey: "HasSeenTutorial")
     @StateObject private var scoreManager = ScoreManager.shared
     @State private var nextTier: CelestialTier = .dust
+    @State private var nextPolarity: Polarity = .neutral
+    @State private var scoreBump: Bool = false
+    @State private var comboLevel: Int = 0
+    @State private var comboResetToken: Int = 0
     
     @State private var gameScene: GameScene = {
         let scene = GameScene()
@@ -14,13 +18,44 @@ struct ContentView: View {
         return scene
     }()
     
+    private var polarityColor: Color {
+        switch nextPolarity {
+        case .positive: return .cyan
+        case .negative: return .orange
+        case .neutral:  return .clear
+        }
+    }
+
+    private var glowColorForNext: Color {
+        nextPolarity == .neutral ? Color(uiColor: nextTier.glowColor) : polarityColor
+    }
+
+    private var comboColor: Color {
+        switch comboLevel {
+        case ...3: return .cyan
+        case 4...5: return .yellow
+        default:   return .orange
+        }
+    }
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             
             SpriteView(scene: gameScene)
                 .allowsHitTesting(!showTutorial && !showGameOver)
-            
+
+            // Combo heat: an escalating edge glow during merge chains.
+            if comboLevel > 1 {
+                Rectangle()
+                    .stroke(comboColor, lineWidth: 90)
+                    .blur(radius: 45)
+                    .opacity(min(Double(comboLevel) / 6.0, 1.0) * 0.65)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
+
             VStack {
                 HStack {
                     VStack(alignment: .leading) {
@@ -30,17 +65,39 @@ struct ContentView: View {
                         Text("\(score)")
                             .font(.system(size: 32, weight: .bold, design: .rounded))
                             .foregroundColor(.white)
+                            .scaleEffect(scoreBump ? 1.18 : 1.0, anchor: .leading)
+                            .onChange(of: score) { _ in
+                                withAnimation(.spring(response: 0.18, dampingFraction: 0.5)) {
+                                    scoreBump = true
+                                }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                                    withAnimation(.spring(response: 0.25, dampingFraction: 0.6)) {
+                                        scoreBump = false
+                                    }
+                                }
+                            }
                     }
                     Spacer()
                     VStack {
                         Text("NEXT")
                             .font(.headline)
                             .foregroundColor(.gray)
-                        Circle()
-                            .fill(nextTier.gradient)
-                            .frame(width: 40, height: 40)
-                            .shadow(color: Color(uiColor: nextTier.glowColor).opacity(0.9), radius: 10)
-                            .animation(.spring(), value: nextTier)
+                        ZStack {
+                            Circle()
+                                .fill(nextTier.gradient)
+                                .overlay(
+                                    Circle().stroke(polarityColor.opacity(nextPolarity == .neutral ? 0 : 0.9), lineWidth: 2)
+                                )
+                                .frame(width: 40, height: 40)
+                                .shadow(color: glowColorForNext.opacity(0.9), radius: 10)
+                            if nextPolarity != .neutral {
+                                Text(nextPolarity == .positive ? "+" : "−")
+                                    .font(.system(size: 24, weight: .black, design: .rounded))
+                                    .foregroundColor(.white.opacity(0.9))
+                            }
+                        }
+                        .animation(.spring(), value: nextTier)
+                        .animation(.spring(), value: nextPolarity)
                     }
                     .frame(width: 80)
                     Spacer()
@@ -70,6 +127,7 @@ struct ContentView: View {
             if showGameOver {
                 GameOverView(score: score, scoreManager: scoreManager) {
                     showGameOver = false
+                    comboLevel = 0
                     gameScene.resetGame()
                     
                     // Show interstitial ad after a short delay to let the UI fade away
@@ -94,14 +152,28 @@ struct ContentView: View {
             }
             gameScene.onGameOver = {
                 scoreManager.submitScore(self.score)
+                withAnimation { self.comboLevel = 0 }
                 withAnimation {
                     self.showGameOver = true
                 }
             }
-            gameScene.onNextTierChanged = { tier in
+            gameScene.onNextTierChanged = { tier, polarity in
                 self.nextTier = tier
+                self.nextPolarity = polarity
+            }
+            gameScene.onComboChanged = { combo in
+                guard combo > 1 else { return }
+                withAnimation(.easeOut(duration: 0.12)) { self.comboLevel = combo }
+                self.comboResetToken += 1
+                let token = self.comboResetToken
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.7) {
+                    if token == self.comboResetToken {
+                        withAnimation(.easeOut(duration: 0.4)) { self.comboLevel = 0 }
+                    }
+                }
             }
             self.nextTier = gameScene.currentNextTier
+            self.nextPolarity = gameScene.currentNextPolarity
         }
     }
 }

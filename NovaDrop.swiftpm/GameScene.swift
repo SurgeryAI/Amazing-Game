@@ -15,7 +15,8 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     
     var onScoreChanged: ((Int) -> Void)?
     var onGameOver: (() -> Void)?
-    var onNextTierChanged: ((CelestialTier) -> Void)?
+    var onNextTierChanged: ((CelestialTier, Polarity) -> Void)?
+    var onComboChanged: ((Int) -> Void)?
     
     private var score = 0 {
         didSet { onScoreChanged?(score) }
@@ -24,8 +25,10 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     private var isGameOver = false
     private var activeBody: SKShapeNode?
     var currentNextTier: CelestialTier = .dust
+    var currentNextPolarity: Polarity = .neutral
     private var mergingIds = Set<String>()
     private let playLayer = SKNode()
+    private let dropGuide = SKShapeNode()
 
     // Combo chain multiplier state
     private var comboCount: Int = 0
@@ -59,14 +62,19 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         let rect = CGRect(x: 0, y: bannerHeight, width: size.width, height: size.height - bannerHeight)
         boundary.physicsBody = SKPhysicsBody(edgeLoopFrom: rect)
         boundary.physicsBody?.categoryBitMask = PhysicsCategory.wall
-        boundary.physicsBody?.contactTestBitMask = PhysicsCategory.none
+        boundary.physicsBody?.contactTestBitMask = PhysicsCategory.body
         boundary.physicsBody?.collisionBitMask = PhysicsCategory.body
         boundary.physicsBody?.restitution = 0.2
         addChild(boundary)
         addChild(playLayer)
         
         topY = size.height - dropLineYOffset
-        
+
+        // Animated cosmic backdrop.
+        buildCosmicBackground(in: self)
+        buildTwinklingStars(in: self)
+        scheduleShootingStars(in: self)
+
         let dashedLine = SKShapeNode()
         let path = CGMutablePath()
         path.move(to: CGPoint(x: 0, y: topY))
@@ -76,15 +84,17 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         let dashed = dashedLine.path?.copy(dashingWithPhase: 0, lengths: [10, 10])
         dashedLine.path = dashed
         addChild(dashedLine)
-        
-        for _ in 0..<50 {
-            let star = SKShapeNode(circleOfRadius: CGFloat.random(in: 1...3))
-            star.fillColor = .white
-            star.alpha = CGFloat.random(in: 0.2...0.8)
-            star.position = CGPoint(x: CGFloat.random(in: 0...size.width), y: CGFloat.random(in: 0...size.height))
-            star.zPosition = -10
-            addChild(star)
-        }
+
+        // Vertical aiming guide that follows the active body down to the floor.
+        let guidePath = CGMutablePath()
+        guidePath.move(to: CGPoint(x: 0, y: topY - 4))
+        guidePath.addLine(to: CGPoint(x: 0, y: bannerHeight + 4))
+        dropGuide.path = guidePath.copy(dashingWithPhase: 0, lengths: [5, 9])
+        dropGuide.strokeColor = UIColor.white.withAlphaComponent(0.22)
+        dropGuide.lineWidth = 2
+        dropGuide.zPosition = -5
+        dropGuide.position = CGPoint(x: size.width / 2, y: 0)
+        addChild(dropGuide)
     }
     
     func randomStartTier() -> CelestialTier {
@@ -103,17 +113,24 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         guard !isGameOver else { return }
         
         let tier = currentNextTier
+        let polarity = currentNextPolarity
         currentNextTier = randomStartTier()
-        onNextTierChanged?(currentNextTier)
-        
-        let node = createBodyNode(tier: tier)
+        currentNextPolarity = rollPolarity(for: currentNextTier)
+        onNextTierChanged?(currentNextTier, currentNextPolarity)
+
+        let node = createBodyNode(tier: tier, forcePolarity: polarity)
         node.position = CGPoint(x: size.width / 2, y: topY)
         
         node.physicsBody = nil
         node.alpha = 0.5
         playLayer.addChild(node)
         activeBody = node
-        
+
+        // Snap the aiming guide back to centre and reveal it.
+        dropGuide.position.x = size.width / 2
+        dropGuide.removeAllActions()
+        dropGuide.run(.fadeAlpha(to: 1.0, duration: 0.15))
+
         // 15% chance to become an "unstable" orb
         if Int.random(in: 1...100) <= 15 {
             // Immediate Visual Indicator
@@ -137,21 +154,30 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
             }
             
             node.run(SKAction.sequence([waitDelay, shakeLoop, forceDrop]), withKey: "unstableTimer")
+        } else {
+            // Gentle "breathing" so the ready orb feels alive.
+            let breatheIn = SKAction.scale(to: 1.05, duration: 0.7)
+            breatheIn.timingMode = .easeInEaseOut
+            let breatheOut = SKAction.scale(to: 0.97, duration: 0.7)
+            breatheOut.timingMode = .easeInEaseOut
+            node.run(SKAction.repeatForever(SKAction.sequence([breatheIn, breatheOut])), withKey: "idlePulse")
         }
     }
     
+    /// Single source of truth for charge assignment: 50% chance to be charged,
+    /// then a fair coin flip for which charge. Black holes / antimatter are never charged.
+    func rollPolarity(for tier: CelestialTier) -> Polarity {
+        guard tier != .blackHole && tier != .antimatter else { return .neutral }
+        if Int.random(in: 1...100) <= 50 {
+            return Bool.random() ? .positive : .negative
+        }
+        return .neutral
+    }
+
     func createBodyNode(tier: CelestialTier, forcePolarity: Polarity? = nil) -> SKShapeNode {
         let node = SKShapeNode(circleOfRadius: tier.radius)
         
-        var polarity: Polarity = .neutral
-        if let forced = forcePolarity {
-            polarity = forced
-        } else if tier != .blackHole && tier != .antimatter {
-            // 50% chance to be charged, then a perfect 50/50 coin flip for which charge
-            if Int.random(in: 1...100) <= 50 {
-                polarity = Bool.random() ? .positive : .negative
-            }
-        }
+        let polarity: Polarity = forcePolarity ?? rollPolarity(for: tier)
         
         node.fillColor = UIColor(tier.color)
         
@@ -306,13 +332,19 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         let r = tier.radius
         let clampedX = max(r, min(size.width - r, x))
         active.position.x = clampedX
+        dropGuide.position.x = clampedX
     }
     
     func dropActiveBody() {
         guard let active = activeBody else { return }
         active.removeAction(forKey: "unstableTimer") // Clear shaking timer if manually dropped
         active.removeAction(forKey: "unstableWarning") // Stop warning pulse
+        active.removeAction(forKey: "idlePulse") // Stop the ready-orb breathing
         active.setScale(1.0)
+
+        // Hide the aiming guide while the orb falls.
+        dropGuide.removeAllActions()
+        dropGuide.run(.fadeAlpha(to: 0.0, duration: 0.15))
         
         active.alpha = 1.0
         let tier = CelestialTier(rawValue: active.userData?["tier"] as? Int ?? 0) ?? .dust
@@ -332,17 +364,28 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         activeBody = nil
         
         run(SKAction.sequence([
-            SKAction.wait(forDuration: 1.0),
+            SKAction.wait(forDuration: 0.25),
             SKAction.run { [weak self] in self?.spawnActiveBody() }
         ]))
     }
     
     func didBegin(_ contact: SKPhysicsContact) {
+        // Wall / floor landings: squash-and-stretch on a meaningful vertical impact.
+        let catA = contact.bodyA.categoryBitMask
+        let catB = contact.bodyB.categoryBitMask
+        if catA == PhysicsCategory.wall || catB == PhysicsCategory.wall {
+            let impacted = (catA == PhysicsCategory.body ? contact.bodyA.node : contact.bodyB.node) as? SKShapeNode
+            if let n = impacted,
+               contact.collisionImpulse > 1.5,
+               abs(contact.contactNormal.dy) > 0.6 {
+                squashLand(n)
+            }
+            return
+        }
+
         let nodeA = contact.bodyA.node as? SKShapeNode
         let nodeB = contact.bodyB.node as? SKShapeNode
-        
 
-        
         guard let a = nodeA, let b = nodeB else { return }
         guard a.parent != nil && b.parent != nil else { return }
         
@@ -384,6 +427,16 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
     
+    /// Quick squash-and-stretch when a body lands, for tactile weight.
+    func squashLand(_ node: SKShapeNode) {
+        guard node.action(forKey: "squash") == nil else { return }
+        let down = SKAction.scaleX(to: 1.14, y: 0.86, duration: 0.06)
+        down.timingMode = .easeOut
+        let up = SKAction.scaleX(to: 1.0, y: 1.0, duration: 0.16)
+        up.timingMode = .easeOut
+        node.run(.sequence([down, up]), withKey: "squash")
+    }
+
     func handleAntiMatterDestruction(nodeA: SKShapeNode, nodeB: SKShapeNode, contactPoint: CGPoint) {
         let idA = nodeA.userData?["mergeId"] as? String ?? ""
         let idB = nodeB.userData?["mergeId"] as? String ?? ""
@@ -414,6 +467,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         mergingIds.remove(idB)
         
         createExplosion(at: contactPoint, color: .red)
+        spawnShockwave(in: self, at: contactPoint, color: .red, radius: 120)
 
         if cleared >= 4 {
             spawnBouncePad(at: contactPoint)
@@ -478,12 +532,14 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         let multiplier = comboCount
         let scoreGain = tier.scoreValue * multiplier
         score += scoreGain
+        onComboChanged?(comboCount)
 
         if multiplier > 1 {
             showComboLabel(multiplier: multiplier, at: contactPoint)
         }
 
         createExplosion(at: contactPoint, color: tier.glowColor)
+        spawnShockwave(in: self, at: contactPoint, color: tier.glowColor, radius: tier.radius * 1.4)
         playHaptic(for: tier)
 
         guard let nextTier = tier.nextTier else {
@@ -498,6 +554,13 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         playLayer.addChild(newNode)
 
         setupBodyPhysics(node: newNode, tier: nextTier)
+
+        // Birth pop: a quick overshoot so each merge feels satisfying.
+        newNode.setScale(0.25)
+        newNode.run(.sequence([
+            .scale(to: 1.12, duration: 0.12),
+            .scale(to: 1.0, duration: 0.08)
+        ]))
 
         // Clean up merge-guard IDs now that the merge is fully processed.
         mergingIds.remove(idA)
@@ -530,19 +593,24 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     
     func createExplosion(at position: CGPoint, color: UIColor) {
         let emitter = SKEmitterNode()
+        emitter.particleTexture = FX.spark          // Without a texture, no particles render.
+        emitter.particleBlendMode = .add            // Bright, glowy burst.
         emitter.particleColor = color
         emitter.particleColorBlendFactor = 1.0
-        emitter.particleBirthRate = 500
-        emitter.numParticlesToEmit = 50
-        emitter.particleLifetime = 0.5
+        emitter.particleBirthRate = 1200
+        emitter.numParticlesToEmit = 60
+        emitter.particleLifetime = 0.6
+        emitter.particleLifetimeRange = 0.3
         emitter.particlePositionRange = CGVector(dx: 15, dy: 15)
-        emitter.particleSpeed = 200
-        emitter.particleSpeedRange = 100
+        emitter.particleSpeed = 220
+        emitter.particleSpeedRange = 120
         emitter.particleAlpha = 1.0
-        emitter.particleAlphaSpeed = -2.0
-        emitter.particleScale = 0.5
-        emitter.particleScaleSpeed = -1.0
+        emitter.particleAlphaSpeed = -1.8
+        emitter.particleScale = 0.6
+        emitter.particleScaleRange = 0.3
+        emitter.particleScaleSpeed = -0.9
         emitter.emissionAngleRange = .pi * 2
+        emitter.zPosition = 40
         emitter.position = position
         
         addChild(emitter)
@@ -615,9 +683,14 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         lastMergeTime = 0
         activeBody = nil
         currentNextTier = randomStartTier()
+        currentNextPolarity = rollPolarity(for: currentNextTier)
         mergingIds.removeAll()
         playLayer.removeAllChildren()
         removeAllActions()       // Clear any pending spawn/drop actions from the previous round
+        scheduleShootingStars(in: self)  // removeAllActions() also cleared this scene-level loop
+        dropGuide.removeAllActions()
+        dropGuide.alpha = 1.0
+        dropGuide.position.x = size.width / 2
         spawnActiveBody()
     }
 
