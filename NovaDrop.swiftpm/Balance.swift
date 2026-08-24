@@ -1,0 +1,105 @@
+import CoreGraphics
+import Foundation
+
+/// Every gameplay number in one place.
+///
+/// These live here rather than scattered through `GameScene` so a tuning pass
+/// is a single file to open between playtests. Nothing in here is referenced
+/// by the save format or the leaderboards, so changing a value is safe — it
+/// changes how the game feels, never what a stored score means.
+enum Balance {
+
+    // MARK: - Charge decay (the difficulty ramp)
+    //
+    // Charges bleed off so a board can never lock permanently — but *how long*
+    // they last is what the Endless ramp escalates. Early on a jam unsticks in
+    // a few drops and the player gets to learn the mechanic forgivingly. Deep
+    // into a run the same jam persists for the better part of a minute, so
+    // sloppy charge management compounds instead of resolving itself.
+    //
+    // The one invariant that must never be broken: a charge ALWAYS expires,
+    // and the symbol ALWAYS blinks before it does. A permanent charge
+    // recreates the unwinnable-board bug this system exists to fix.
+
+    /// Charge lifetime at the start of a run, in seconds.
+    static let chargeLifetimeBase: TimeInterval = 12
+    /// Charge lifetime once the ramp is fully wound up.
+    static let chargeLifetimeMax: TimeInterval = 26
+    /// Score at which the ramp reaches `chargeLifetimeMax`.
+    static let chargeRampScore: Double = 4000
+    /// Seconds of blinking warning before a charge fades.
+    static let chargeWarningLead: TimeInterval = 3.0
+
+    /// Lifetime for a charge stamped at the given score.
+    ///
+    /// Eased so most of the tightening happens in the first half of the ramp —
+    /// the player should feel the game hardening while they are still building,
+    /// not discover it only after a record run.
+    static func chargeLifetime(atScore score: Int) -> TimeInterval {
+        let t = min(1.0, max(0.0, Double(score) / chargeRampScore))
+        let eased = 1 - pow(1 - t, 2)
+        return chargeLifetimeBase + (chargeLifetimeMax - chargeLifetimeBase) * eased
+    }
+
+    // MARK: - Danger
+
+    /// Seconds between the cosmos overflowing and the run ending.
+    static let overflowGrace: TimeInterval = 2.0
+    /// Speed below which a body counts as settled for overflow purposes.
+    /// Lower is harsher: a body still creeping counts against you sooner.
+    static let settledSpeed: CGFloat = 45
+    /// How far below the danger line the UI vignette starts to rise.
+    static let dangerProximityWindow: CGFloat = 140
+
+    // MARK: - Scoring
+
+    /// Seconds within which a second merge continues a chain.
+    static let comboWindow: TimeInterval = 1.5
+    /// Flat bonus for a Big Crunch, before the combo multiplier.
+    static let bigCrunchBonus = 250
+    /// Bonus per body swallowed by a Big Crunch.
+    static let bigCrunchPerBody = 40
+
+    // MARK: - Drops
+
+    /// Delay between dropping a body and the next one appearing.
+    static let respawnDelay: TimeInterval = 0.25
+    /// How long an unstable orb waits before it starts shaking.
+    static let unstableFuse: TimeInterval = 3.0
+
+    // MARK: - Forces
+
+    static let blackHolePullRadius: CGFloat = 220
+    static let blackHolePullStrength: CGFloat = 180
+    static let magnetRadius: CGFloat = 130
+    static let magnetStrength: CGFloat = 200
+    /// Like charges shove apart harder than opposites pull together.
+    static let magnetRepelMultiplier: CGFloat = 1.5
+
+    // MARK: - Blasts
+
+    static let antimatterReach: CGFloat = 120
+    /// Bodies an antimatter blast must clear before it leaves a bounce pad.
+    static let bouncePadThreshold = 4
+    static let bouncePadLifetime: TimeInterval = 12
+    static let bigCrunchReach: CGFloat = 260
+    /// Bodies removed from the top of the stack by a Second Chance.
+    static let secondChancePurgeCount = 6
+
+    // MARK: - Progression
+    //
+    // Endless ramps on score, which rewards skill with bigger raw material.
+    // Daily ramps on drop index instead, so the sequence is identical for
+    // every player regardless of how well any of them is doing.
+
+    static let endlessPlanetScore = 200
+    static let endlessGiantScore = 500
+    static let endlessAntimatterScore = 300
+
+    static let dailyPlanetDrop = 22
+    static let dailyGiantDrop = 48
+    static let dailyAntimatterDrop = 40
+
+    /// Percent chance a fresh drop is antimatter, once unlocked.
+    static let antimatterChance = 3
+}

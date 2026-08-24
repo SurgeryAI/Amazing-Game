@@ -20,26 +20,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         static let wall: UInt32 = 0b10
     }
 
-    // MARK: - Tuning
-
-    /// How long a charged body keeps its charge after being dropped.
-    ///
-    /// This is the single most important balance change in the build. Two
-    /// like-charged bodies repel and refuse to merge, which previously meant a
-    /// board holding two positive Stars was *permanently* stuck — the run was
-    /// dead and the player had no way to know why. Charge now bleeds off, so
-    /// a jam is a timing problem to be waited out and played around rather
-    /// than a silent loss condition.
-    private let chargeLifetime: TimeInterval = 14.0
-
-    /// Grace period between the cosmos overflowing and the run ending.
-    private let overflowGrace: TimeInterval = 2.5
-
-    /// Speed below which a body counts as settled, for overflow purposes.
-    private let settledSpeed: CGFloat = 70
-
-    private let comboWindow: TimeInterval = 1.5
-    private let secondChancePurgeCount = 6
+    // Tuning lives in `Balance` so a difficulty pass is one file to open.
 
     // MARK: - Callbacks
 
@@ -309,16 +290,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // sees the identical sequence; in Endless it ramps on score, which
         // rewards skill with bigger raw material.
         let progression = usesSeed ? index : score
-        let planetGate = usesSeed ? 22 : 200
-        let giantGate = usesSeed ? 48 : 500
-        let antimatterGate = usesSeed ? 40 : 300
+        let planetGate = usesSeed ? Balance.dailyPlanetDrop : Balance.endlessPlanetScore
+        let giantGate = usesSeed ? Balance.dailyGiantDrop : Balance.endlessGiantScore
+        let antimatterGate = usesSeed ? Balance.dailyAntimatterDrop : Balance.endlessAntimatterScore
 
         var maxRaw = 2
         if progression >= giantGate { maxRaw = 4 }
         else if progression >= planetGate { maxRaw = 3 }
         maxRaw = min(CelestialTier.gasGiant.rawValue, maxRaw + modifier.startTierBonus)
 
-        if progression > antimatterGate && roll(1...100, using: &g) <= 3 {
+        if progression > antimatterGate && roll(1...100, using: &g) <= Balance.antimatterChance {
             spec.tier = .antimatter
         } else {
             spec.tier = CelestialTier(rawValue: roll(0...maxRaw, using: &g)) ?? .dust
@@ -379,7 +360,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 .moveBy(x: -6, y: 0, duration: 0.05)
             ])
             node.run(.sequence([
-                .wait(forDuration: 3.0),
+                .wait(forDuration: Balance.unstableFuse),
                 .repeat(shakeStep, count: 15),
                 .run { [weak self] in self?.dropActiveBody() }
             ]), withKey: "unstableTimer")
@@ -557,14 +538,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // The charge clock starts on release, not on spawn, so time spent
         // aiming never eats into it.
         if polarity != .neutral {
-            active.userData?["chargeBorn"] = CACurrentMediaTime()
+            stampCharge(on: active, at: CACurrentMediaTime())
         }
 
         setupBodyPhysics(node: active, tier: tier)
         AudioManager.shared.play(.drop, volume: 0.7)
 
         run(.sequence([
-            .wait(forDuration: 0.25),
+            .wait(forDuration: Balance.respawnDelay),
             .run { [weak self] in self?.spawnActiveBody() }
         ]), withKey: "respawn")
     }
@@ -658,7 +639,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         nodeB.removeFromParent()
 
         let now = CACurrentMediaTime()
-        comboCount = (now - lastMergeTime <= comboWindow) ? comboCount + 1 : 1
+        comboCount = (now - lastMergeTime <= Balance.comboWindow) ? comboCount + 1 : 1
         lastMergeTime = now
 
         let multiplier = comboCount
@@ -699,7 +680,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let newNode = createBodyNode(tier: nextTier, polarity: resultingPolarity)
         newNode.position = point
         if resultingPolarity != .neutral {
-            newNode.userData?["chargeBorn"] = now
+            stampCharge(on: newNode, at: now)
         }
         playLayer.addChild(newNode)
         setupBodyPhysics(node: newNode, tier: nextTier)
@@ -719,7 +700,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func bigCrunch(at point: CGPoint, multiplier: Int) {
         runStats.bigCrunches += 1
 
-        let reach: CGFloat = 260
+        let reach = Balance.bigCrunchReach
         let reachSq = reach * reach
         var swallowed = 0
 
@@ -735,7 +716,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if !isProp { swallowed += 1 }
         }
 
-        score += 250 * multiplier + swallowed * 40
+        score += Balance.bigCrunchBonus * multiplier + swallowed * Balance.bigCrunchPerBody
 
         spawnShockwave(in: self, at: point, color: .purple, radius: reach)
         spawnShockwave(in: self, at: point, color: .white, radius: reach * 0.55)
@@ -784,7 +765,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let idA = nodeA.userData?["mergeId"] as? String ?? ""
         let idB = nodeB.userData?["mergeId"] as? String ?? ""
 
-        let reach: CGFloat = 120
+        let reach = Balance.antimatterReach
         let reachSq = reach * reach
         var cleared = 0
 
@@ -825,7 +806,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         AudioManager.shared.play(.antimatter, volume: 0.9)
         HapticManager.shared.impact(intensity: 1.0, sharpness: 1.0)
 
-        if cleared >= 4 {
+        if cleared >= Balance.bouncePadThreshold {
             spawnBouncePad(at: point)
         }
     }
@@ -854,7 +835,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         playLayer.addChild(pad)
         pad.run(.sequence([
-            .wait(forDuration: 12.0),
+            .wait(forDuration: Balance.bouncePadLifetime),
             .fadeOut(withDuration: 1.0),
             .removeFromParent()
         ]))
@@ -931,6 +912,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     // MARK: - Charge decay
 
+    /// Records when a charge started and how long it gets.
+    ///
+    /// The lifetime is fixed at stamp time from the score *then*, so a body
+    /// dropped early in a run keeps its short, forgiving fuse even if the
+    /// score climbs while it sits there. The ramp raises the cost of new
+    /// mistakes rather than retroactively punishing old ones.
+    private func stampCharge(on node: SKShapeNode, at time: TimeInterval) {
+        node.userData?["chargeBorn"] = time
+        node.userData?["chargeLife"] = Balance.chargeLifetime(atScore: score)
+    }
+
     private func neutralize(_ node: SKShapeNode) {
         guard let data = node.userData,
               (data["polarity"] as? Int ?? 0) != Polarity.neutral.rawValue else { return }
@@ -1006,9 +998,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func applyBlackHoleGravity(bodies: [SKShapeNode], blackHoles: [SKShapeNode]) {
         guard !blackHoles.isEmpty else { return }
-        let pullRadius: CGFloat = 220
+        let pullRadius = Balance.blackHolePullRadius
         let pullRadiusSq = pullRadius * pullRadius
-        let pullStrength: CGFloat = 180
+        let pullStrength = Balance.blackHolePullStrength
 
         for hole in blackHoles {
             for body in bodies where body !== hole {
@@ -1026,7 +1018,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func applyMagnetism(charged: [SKShapeNode]) {
         guard charged.count > 1 else { return }
-        let radius: CGFloat = 130
+        let radius = Balance.magnetRadius
         let radiusSq = radius * radius
 
         for i in 0..<(charged.count - 1) {
@@ -1045,8 +1037,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 guard distSq > 1, distSq < radiusSq else { continue }
 
                 let dist = sqrt(distSq)
-                let base: CGFloat = 200 * (1 - dist / radius)
-                let magnitude = (polA != polB) ? base : -base * 1.5
+                let base = Balance.magnetStrength * (1 - dist / radius)
+                let magnitude = (polA != polB) ? base : -base * Balance.magnetRepelMultiplier
                 let fx = (dx / dist) * magnitude
                 let fy = (dy / dist) * magnitude
                 pbA.applyForce(CGVector(dx: fx, dy: fy))
@@ -1058,13 +1050,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func decayCharges(charged: [SKShapeNode], now: TimeInterval) {
         for node in charged {
             guard let born = node.userData?["chargeBorn"] as? TimeInterval else { continue }
+            let life = node.userData?["chargeLife"] as? TimeInterval ?? Balance.chargeLifetimeBase
             let age = now - born
-            if age >= chargeLifetime {
+            if age >= life {
                 neutralize(node)
-            } else if age >= chargeLifetime - 3.0,
+            } else if age >= life - Balance.chargeWarningLead,
                       node.childNode(withName: "polaritySymbol")?.action(forKey: "fading") == nil {
-                // Telegraph the last three seconds so the decay never feels
-                // like something that just happened to the player.
+                // Telegraph the final seconds so the decay never feels like
+                // something that just happened to the player.
                 node.childNode(withName: "polaritySymbol")?.run(
                     .repeatForever(.sequence([
                         .fadeAlpha(to: 0.25, duration: 0.25),
@@ -1093,7 +1086,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // second of its life.
             if let pb = node.physicsBody {
                 let v = pb.velocity
-                if sqrt(v.dx * v.dx + v.dy * v.dy) > settledSpeed { continue }
+                if sqrt(v.dx * v.dx + v.dy * v.dy) > Balance.settledSpeed { continue }
             }
             isOverflowing = true
         }
@@ -1105,7 +1098,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 AudioManager.shared.play(.danger, volume: 0.75)
                 HapticManager.shared.warning()
             }
-            if gameOverTimer >= overflowGrace {
+            if gameOverTimer >= Balance.overflowGrace {
                 triggerGameOver()
                 return
             }
@@ -1116,9 +1109,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // Danger reported to the UI blends "stack is getting high" with "the
         // countdown is running", so the vignette rises smoothly and then
         // spikes rather than appearing out of nowhere.
-        let proximityWindow: CGFloat = 140
+        let proximityWindow = Balance.dangerProximityWindow
         let proximity = max(0, min(1, (highestTop - (topY - proximityWindow)) / proximityWindow))
-        let countdown = min(1, gameOverTimer / overflowGrace)
+        let countdown = min(1, gameOverTimer / Balance.overflowGrace)
         let danger = max(Double(proximity), countdown)
 
         if abs(danger - reportedDanger) > 0.04 || (danger == 0 && reportedDanger != 0) {
@@ -1194,7 +1187,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 && $0.physicsBody != nil }
             .sorted { $0.position.y > $1.position.y }
 
-        for node in candidates.prefix(secondChancePurgeCount) {
+        for node in candidates.prefix(Balance.secondChancePurgeCount) {
             implode(node, toward: purgePoint)
         }
 

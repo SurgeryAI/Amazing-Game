@@ -366,7 +366,7 @@ struct TutorialView: View {
 
                         rule(icon: "bolt.fill", tint: .orange,
                              title: "Charges attract and repel",
-                             text: "A body marked + or − pulls on opposite charges and shoves away matching ones. Two like-charged bodies refuse to merge — but a charge fades after a few seconds, and the symbol blinks before it goes. Wait it out, or use the pull to line up a chain.")
+                             text: "A body marked + or − pulls on opposite charges and shoves away matching ones. Two like-charged bodies refuse to merge — but a charge fades, and the symbol blinks before it goes. Wait it out, or use the pull to line up a chain. The deeper you get, the longer charges hold on.")
 
                         rule(icon: "burst.fill", tint: .red,
                              title: "Antimatter clears the board",
