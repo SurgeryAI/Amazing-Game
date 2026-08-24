@@ -45,9 +45,25 @@ enum Balance {
 
     /// Seconds between the cosmos overflowing and the run ending.
     static let overflowGrace: TimeInterval = 2.0
-    /// Speed below which a body counts as settled for overflow purposes.
-    /// Lower is harsher: a body still creeping counts against you sooner.
-    static let settledSpeed: CGFloat = 45
+
+    /// How far above the danger line a body's top edge must sit to register.
+    static let overflowMargin: CGFloat = 8
+
+    /// How long a body must stay above the line before it counts against you.
+    ///
+    /// This replaced a velocity threshold, which was subtly catastrophic: on a
+    /// full board magnetism, the spawn overlap and the contact solver keep
+    /// everything near the top permanently jostling, so no body ever read as
+    /// "settled" and the run could not end at all. Position over time cannot be
+    /// gamed that way. The slowest tier falling from the spawn point clears the
+    /// line in about 0.3s, so half a second cleanly separates "falling through"
+    /// from "resting on a full stack".
+    static let overflowDwell: TimeInterval = 0.5
+
+    /// How fast the countdown unwinds when the board is no longer overflowing,
+    /// as a multiple of real time. Decaying rather than snapping to zero means
+    /// one lucky frame cannot wipe out an accumulated countdown.
+    static let overflowRecoveryRate: Double = 2.0
     /// How far below the danger line the UI vignette starts to rise.
     static let dangerProximityWindow: CGFloat = 140
 
@@ -71,8 +87,11 @@ enum Balance {
 
     static let blackHolePullRadius: CGFloat = 220
     static let blackHolePullStrength: CGFloat = 180
-    static let magnetRadius: CGFloat = 130
-    static let magnetStrength: CGFloat = 200
+    /// Reach and pull of a charge. Deliberately short: at longer range the
+    /// magnets drag same-tier opposites together on their own and the board
+    /// solves itself without the player aiming anything.
+    static let magnetRadius: CGFloat = 100
+    static let magnetStrength: CGFloat = 140
     /// Like charges shove apart harder than opposites pull together.
     static let magnetRepelMultiplier: CGFloat = 1.5
 

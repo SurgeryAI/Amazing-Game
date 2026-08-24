@@ -1072,23 +1072,26 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         var isOverflowing = false
 
         for node in bodies {
-            guard let tierRaw = node.userData?["tier"] as? Int,
+            guard let data = node.userData,
+                  let tierRaw = data["tier"] as? Int,
                   let tier = CelestialTier(rawValue: tierRaw) else { continue }
             let topEdge = node.position.y + tier.radius
             highestTop = max(highestTop, topEdge)
 
-            guard topEdge > topY + 8 else { continue }
-
-            // Only a body that has actually come to rest above the line counts.
-            // Previously *any* body above the line did, which meant every
-            // freshly dropped orb — which spawns at the line and falls through
-            // it — started the death countdown for the first fraction of a
-            // second of its life.
-            if let pb = node.physicsBody {
-                let v = pb.velocity
-                if sqrt(v.dx * v.dx + v.dy * v.dy) > Balance.settledSpeed { continue }
+            guard topEdge > topY + Balance.overflowMargin else {
+                data["aboveSince"] = nil
+                continue
             }
-            isOverflowing = true
+
+            // How long the body has hung above the line — not how fast it is
+            // moving. A freshly dropped orb spawns at the line and falls
+            // through it in about a third of a second, so it never reaches the
+            // dwell threshold; a body resting on a full stack never leaves.
+            if let since = data["aboveSince"] as? TimeInterval {
+                if now - since >= Balance.overflowDwell { isOverflowing = true }
+            } else {
+                data["aboveSince"] = now
+            }
         }
 
         if isOverflowing {
@@ -1103,7 +1106,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 return
             }
         } else {
-            gameOverTimer = 0
+            // Unwind rather than reset. A hard reset meant a single frame in
+            // which nothing qualified wiped out the whole countdown, so it
+            // could never accumulate on a jittering board.
+            gameOverTimer = max(0, gameOverTimer - dt * Balance.overflowRecoveryRate)
         }
 
         // Danger reported to the UI blends "stack is getting high" with "the
