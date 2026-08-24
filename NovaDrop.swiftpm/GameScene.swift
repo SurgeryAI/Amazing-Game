@@ -39,7 +39,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private let settledSpeed: CGFloat = 70
 
     private let comboWindow: TimeInterval = 1.5
-    private let dropLineYOffset = Layout.dropLineInset
     private let secondChancePurgeCount = 6
 
     // MARK: - Callbacks
@@ -98,8 +97,55 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// scene, which would spawn the first orb into an unbuilt world.
     private var hasAppeared = false
 
+    /// Safe-area insets, pushed in from the SwiftUI layer — the only layer that
+    /// knows them. The scene's own edges are the *physical* screen edges, so
+    /// without these the floor is drawn behind the banner and the danger line
+    /// hides under the HUD.
+    private var safeAreaTop: CGFloat = 0
+    private var safeAreaBottom: CGFloat = 0
+
     private var topY: CGFloat = 0
-    private var floorY: CGFloat { Layout.bannerHeight + Layout.floorPadding }
+
+    /// Height of the floor above the scene's bottom edge: the home indicator,
+    /// then the banner, then a gap wide enough for a resting body's glow.
+    private var floorY: CGFloat {
+        safeAreaBottom + Layout.bannerHeight + Layout.floorPadding
+    }
+
+    /// Depth of the danger line below the scene's top edge. Clears the HUD on
+    /// notched devices without stealing play area on ones with a small inset.
+    private var dropLineYOffset: CGFloat {
+        max(Layout.dropLineInset, safeAreaTop + Layout.hudClearance)
+    }
+
+    /// Called by the UI whenever the safe area is known or changes.
+    func setSafeAreaInsets(top: CGFloat, bottom: CGFloat) {
+        let newTop = max(0, top)
+        let newBottom = max(0, bottom)
+        guard abs(newTop - safeAreaTop) > 0.5 || abs(newBottom - safeAreaBottom) > 0.5 else { return }
+        safeAreaTop = newTop
+        safeAreaBottom = newBottom
+
+        guard hasAppeared else { return }   // didMove will build with these values
+        rebuildBoundary()
+        layoutGuides()
+        liftBodiesOffFloor()
+    }
+
+    /// After the floor moves up, any body left below it would be embedded in
+    /// the new wall and shoved out hard by the solver. Seat them on it instead.
+    private func liftBodiesOffFloor() {
+        for child in playLayer.children {
+            guard let node = child as? SKShapeNode,
+                  let tierRaw = node.userData?["tier"] as? Int,
+                  let tier = CelestialTier(rawValue: tierRaw) else { continue }
+            let restingY = floorY + tier.radius
+            if node.position.y < restingY {
+                node.position.y = restingY
+                node.physicsBody?.velocity = .zero
+            }
+        }
+    }
 
     // MARK: - Motion
 

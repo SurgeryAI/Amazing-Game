@@ -77,6 +77,19 @@ struct ContentView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
+            // Measures the real safe-area insets and hands them to the scene.
+            // The SpriteView ignores the safe area so the starfield reaches the
+            // screen edges, which means the scene's bottom edge sits *below*
+            // the banner — the floor has to be lifted by the same amount or the
+            // ad covers the floor and the bodies resting on it.
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { pushSafeArea(geo.safeAreaInsets) }
+                    .onChange(of: geo.safeAreaInsets) { insets in pushSafeArea(insets) }
+            }
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+
             SpriteView(scene: scene, isPaused: !isPlaying)
                 .ignoresSafeArea()
                 .allowsHitTesting(isPlaying)
@@ -282,6 +295,10 @@ struct ContentView: View {
     }
 
     // MARK: - Wiring
+
+    private func pushSafeArea(_ insets: EdgeInsets) {
+        scene.setSafeAreaInsets(top: insets.top, bottom: insets.bottom)
+    }
 
     private func wireScene() {
         guard scene.onGameOver == nil else { return }   // wire exactly once
