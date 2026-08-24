@@ -1,0 +1,11 @@
+# macOS
+.DS_Store
+
+# Swift Package Manager build output / index
+.build/
+.swiftpm/xcode/package.xcworkspace/xcuserdata/
+.swiftpm/xcode/xcuserdata/
+
+# Xcode user state (per-machine, changes on every build/open)
+*.xcuserstate
+xcuserdata/
