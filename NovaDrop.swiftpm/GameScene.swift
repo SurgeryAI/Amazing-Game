@@ -322,6 +322,22 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func spawnActiveBody() {
         guard !isGameOver, activeBody == nil else { return }
 
+        // Never spawn into an occupied drop point.
+        //
+        // This is what made rapid-fire tapping into a full board an exploit
+        // rather than a loss: each new body appeared *inside* the stack, and
+        // the solver resolved the overlap by firing everything apart hard
+        // enough to leave the world. Waiting for room instead means a board
+        // with nowhere left to drop simply stops feeding the player — and the
+        // bodies sitting above the danger line run out the overflow clock.
+        if isSpawnBlocked(tier: currentSpec.tier) {
+            run(.sequence([
+                .wait(forDuration: Balance.spawnRetryDelay),
+                .run { [weak self] in self?.spawnActiveBody() }
+            ]), withKey: "respawn")
+            return
+        }
+
         let spec = advanceQueue()
         let node = createBodyNode(tier: spec.tier, polarity: spec.polarity)
         node.position = CGPoint(x: size.width / 2, y: topY)
@@ -371,6 +387,27 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             breatheOut.timingMode = .easeInEaseOut
             node.run(.repeatForever(.sequence([breatheIn, breatheOut])), withKey: "idlePulse")
         }
+    }
+
+    /// Is there already a body sitting where the next one would appear?
+    private func isSpawnBlocked(tier: CelestialTier) -> Bool {
+        let point = CGPoint(x: size.width / 2, y: topY)
+        let clearance = tier.radius * Balance.spawnBlockRadiusScale
+
+        for child in playLayer.children {
+            guard let node = child as? SKShapeNode, node !== activeBody,
+                  let data = node.userData, node.physicsBody != nil else { continue }
+            if data["isBounce"] as? Bool == true { continue }
+            if data["dying"] as? Bool == true { continue }
+            guard let tierRaw = data["tier"] as? Int,
+                  let other = CelestialTier(rawValue: tierRaw) else { continue }
+
+            let dx = node.position.x - point.x
+            let dy = node.position.y - point.y
+            let minimum = clearance + other.radius * Balance.spawnBlockRadiusScale
+            if dx * dx + dy * dy < minimum * minimum { return true }
+        }
+        return false
     }
 
     func createBodyNode(tier: CelestialTier, polarity: Polarity) -> SKShapeNode {
@@ -463,7 +500,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         body.restitution = 0.1
         body.friction = 0.2
         body.angularDamping = 0.2
-        body.linearDamping = 0.0
+        body.linearDamping = Balance.linearDamping
+        // Continuous collision detection for the small tiers, which are the
+        // ones that can cross their own diameter in a single frame and pass
+        // straight through a wall. The heavy tiers never move fast enough to
+        // need it and it is not cheap.
+        body.usesPreciseCollisionDetection = tier.rawValue <= CelestialTier.moon.rawValue
         body.categoryBitMask = PhysicsCategory.body
         body.contactTestBitMask = PhysicsCategory.body | PhysicsCategory.wall
         body.collisionBitMask = PhysicsCategory.body | PhysicsCategory.wall
@@ -826,7 +868,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         let body = SKPhysicsBody(rectangleOf: size)
         body.isDynamic = false
-        body.restitution = 1.3
+        body.restitution = Balance.bouncePadRestitution
         body.friction = 0.2
         body.categoryBitMask = PhysicsCategory.wall
         body.contactTestBitMask = PhysicsCategory.none
@@ -964,6 +1006,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if data["isBounce"] as? Bool == true { continue }
             if data["dying"] as? Bool == true { continue }
             guard node.physicsBody != nil, let tierRaw = data["tier"] as? Int else { continue }
+            if let tier = CelestialTier(rawValue: tierRaw) { keepInWorld(node, tier: tier) }
             bodies.append(node)
             if tierRaw == CelestialTier.blackHole.rawValue { blackHoles.append(node) }
             if (data["polarity"] as? Int ?? 0) != Polarity.neutral.rawValue { charged.append(node) }
@@ -973,6 +1016,36 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         applyMagnetism(charged: charged)
         decayCharges(charged: charged, now: now)
         evaluateDanger(bodies: bodies, dt: dt, now: now)
+    }
+
+    /// Caps speed and puts back anything that has left the play area.
+    ///
+    /// The cap is the real fix — a body moving faster than its own diameter
+    /// per frame can cross a wall between two simulation steps no matter what
+    /// the collision masks say. The reposition is a belt-and-braces net for
+    /// anything that still slips out, because a body that silently leaves the
+    /// world takes its area off the board and makes the game unloseable.
+    private func keepInWorld(_ node: SKShapeNode, tier: CelestialTier) {
+        guard let pb = node.physicsBody else { return }
+
+        let v = pb.velocity
+        let speed = sqrt(v.dx * v.dx + v.dy * v.dy)
+        if speed > Balance.maxBodySpeed {
+            let scale = Balance.maxBodySpeed / speed
+            pb.velocity = CGVector(dx: v.dx * scale, dy: v.dy * scale)
+        }
+
+        let r = tier.radius
+        let minX = r, maxX = size.width - r
+        let minY = floorY + r, maxY = size.height - r
+        let escaped = node.position.x < minX - 30 || node.position.x > maxX + 30
+                   || node.position.y < minY - 40 || node.position.y > maxY + 200
+        if escaped {
+            node.position = CGPoint(x: min(maxX, max(minX, node.position.x)),
+                                    y: min(maxY, max(minY, node.position.y)))
+            pb.velocity = .zero
+            pb.angularVelocity = 0
+        }
     }
 
     private func applyTiltGravity() {

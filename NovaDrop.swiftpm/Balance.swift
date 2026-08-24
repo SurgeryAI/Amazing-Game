@@ -76,12 +76,45 @@ enum Balance {
     /// Bonus per body swallowed by a Big Crunch.
     static let bigCrunchPerBody = 40
 
+    // MARK: - Board size
+
+    /// Multiplier on every body radius.
+    ///
+    /// The single cleanest difficulty knob: capacity falls with the square of
+    /// this, so 1.15 leaves the board holding about a quarter fewer bodies
+    /// without moving the danger line or changing the layout. Raise it to
+    /// tighten the game, lower it to open it up.
+    static let bodyScale: CGFloat = 1.15
+
     // MARK: - Drops
 
     /// Delay between dropping a body and the next one appearing.
     static let respawnDelay: TimeInterval = 0.25
+
+    /// How long to wait before retrying a spawn whose drop point is occupied.
+    static let spawnRetryDelay: TimeInterval = 0.15
+
+    /// Fraction of a radius used when testing whether the drop point is clear.
+    /// Below 1 so bodies must genuinely intrude on the spawn zone to block it.
+    static let spawnBlockRadiusScale: CGFloat = 0.85
     /// How long an unstable orb waits before it starts shaking.
     static let unstableFuse: TimeInterval = 3.0
+
+    // MARK: - Physics safety
+    //
+    // Without these a body could leave the world entirely. Dropping into an
+    // already-occupied point spawns a body *inside* the stack; the solver
+    // resolves that overlap with an enormous impulse, and an uncapped,
+    // undamped body moving faster than its own diameter per frame passes
+    // straight through the boundary. Bodies leaked out of play, the board
+    // visibly emptied, and the run became unloseable.
+
+    /// Hard ceiling on body speed, in points per second.
+    static let maxBodySpeed: CGFloat = 1400
+    /// Light damping so repeated magnetic forces cannot pump in energy forever.
+    static let linearDamping: CGFloat = 0.08
+    /// Bounce pads add energy; keep it modest.
+    static let bouncePadRestitution: CGFloat = 1.2
 
     // MARK: - Forces
 

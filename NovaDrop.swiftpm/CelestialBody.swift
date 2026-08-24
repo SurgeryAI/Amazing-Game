@@ -48,7 +48,10 @@ enum CelestialTier: Int, CaseIterable {
         }
     }
 
-    var radius: CGFloat {
+    /// Rendered and simulated radius, after the global size knob.
+    var radius: CGFloat { baseRadius * Balance.bodyScale }
+
+    private var baseRadius: CGFloat {
         switch self {
         case .dust: return 15
         case .meteor: return 22
