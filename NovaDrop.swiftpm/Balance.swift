@@ -97,6 +97,24 @@ enum Balance {
     /// Fraction of a radius used when testing whether the drop point is clear.
     /// Below 1 so bodies must genuinely intrude on the spawn zone to block it.
     static let spawnBlockRadiusScale: CGFloat = 0.85
+
+    /// Consecutive blocked-spawn retries before the run ends.
+    ///
+    /// At `spawnRetryDelay` apart this is the classic merge-game loss: if the
+    /// drop point stays buried for about a second and a half, the cosmos is
+    /// full and the run is over. Without it a jammed board just stalls forever
+    /// with nothing to drop.
+    static let spawnBlockRetryLimit = 10
+
+    /// Relative likelihood of each droppable tier, Dust first.
+    ///
+    /// A uniform roll over the unlocked range handed out a Gas Giant on one
+    /// drop in five — fifteen Dust worth of area, for free. It let a player
+    /// climb the ladder without doing the merging that is supposed to be the
+    /// entire game. Weighted toward the small end, big bodies have to be
+    /// earned, and the board clogs with the small orphans that make a merge
+    /// game tense.
+    static let dropWeights: [Int] = [34, 28, 22, 12, 4]
     /// How long an unstable orb waits before it starts shaking.
     static let unstableFuse: TimeInterval = 3.0
 
@@ -115,6 +133,10 @@ enum Balance {
     static let linearDamping: CGFloat = 0.08
     /// Bounce pads add energy; keep it modest.
     static let bouncePadRestitution: CGFloat = 1.2
+    /// Body friction. Higher means bodies slide into gaps less readily, so a
+    /// pile packs loosely and climbs faster — difficulty without touching the
+    /// size of the play area.
+    static let bodyFriction: CGFloat = 0.45
 
     // MARK: - Forces
 
@@ -134,7 +156,12 @@ enum Balance {
     /// Bodies an antimatter blast must clear before it leaves a bounce pad.
     static let bouncePadThreshold = 4
     static let bouncePadLifetime: TimeInterval = 12
-    static let bigCrunchReach: CGFloat = 260
+    /// Reach of a Big Crunch.
+    ///
+    /// Was 260, which cleared 94% of the board — a reset button that made a
+    /// good run unloseable. At 200 it still takes out half the cosmos and
+    /// remains the best thing that can happen in a run, without erasing it.
+    static let bigCrunchReach: CGFloat = 200
     /// Bodies removed from the top of the stack by a Second Chance.
     static let secondChancePurgeCount = 6
 

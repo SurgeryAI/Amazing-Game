@@ -67,6 +67,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var comboCount = 0
     private var lastMergeTime: TimeInterval = 0
 
+    private var spawnBlockedRetries = 0
     private var gameOverTimer: TimeInterval = 0
     private var lastUpdateTime: TimeInterval = 0
     private var lastWarningBeep: TimeInterval = 0
@@ -302,7 +303,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if progression > antimatterGate && roll(1...100, using: &g) <= Balance.antimatterChance {
             spec.tier = .antimatter
         } else {
-            spec.tier = CelestialTier(rawValue: roll(0...maxRaw, using: &g)) ?? .dust
+            spec.tier = weightedTier(maxRaw: maxRaw, using: &g)
         }
 
         // Black holes and antimatter never carry a charge — they have their own
@@ -315,6 +316,25 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         spec.unstable = roll(1...100, using: &g) <= modifier.unstableChance
 
         return spec
+    }
+
+    /// Picks a drop tier from `Balance.dropWeights`, restricted to what has
+    /// been unlocked. Consumes exactly one roll, so a seeded Daily run stays
+    /// reproducible.
+    private func weightedTier(maxRaw: Int, using g: inout SeededGenerator) -> CelestialTier {
+        let weights = Balance.dropWeights
+        let top = max(0, min(maxRaw, weights.count - 1))
+
+        var total = 0
+        for i in 0...top { total += weights[i] }
+        guard total > 0 else { return .dust }
+
+        var pick = roll(1...total, using: &g)
+        for i in 0...top {
+            pick -= weights[i]
+            if pick <= 0 { return CelestialTier(rawValue: i) ?? .dust }
+        }
+        return .dust
     }
 
     // MARK: - Spawning
@@ -331,12 +351,30 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // with nowhere left to drop simply stops feeding the player — and the
         // bodies sitting above the danger line run out the overflow clock.
         if isSpawnBlocked(tier: currentSpec.tier) {
+            spawnBlockedRetries += 1
+
+            // A drop point that stays buried means there is nowhere left to
+            // play. That is the loss, not a stall to sit in forever.
+            if spawnBlockedRetries >= Balance.spawnBlockRetryLimit {
+                triggerGameOver()
+                return
+            }
+
+            // Peg the danger vignette while the board is jammed, so the player
+            // can see the run being lost rather than just wondering where the
+            // next orb went.
+            if reportedDanger < 1 {
+                reportedDanger = 1
+                onDangerChanged?(1)
+            }
+
             run(.sequence([
                 .wait(forDuration: Balance.spawnRetryDelay),
                 .run { [weak self] in self?.spawnActiveBody() }
             ]), withKey: "respawn")
             return
         }
+        spawnBlockedRetries = 0
 
         let spec = advanceQueue()
         let node = createBodyNode(tier: spec.tier, polarity: spec.polarity)
@@ -498,7 +536,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let body = SKPhysicsBody(circleOfRadius: tier.radius)
         body.mass = tier.mass
         body.restitution = 0.1
-        body.friction = 0.2
+        body.friction = Balance.bodyFriction
         body.angularDamping = 0.2
         body.linearDamping = Balance.linearDamping
         // Continuous collision detection for the small tiers, which are the
@@ -1249,6 +1287,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         guard canOfferSecondChance else { return }
 
         secondChanceUsed = true
+        spawnBlockedRetries = 0
         wasAssisted = true
         runStats.wasAssisted = true
         isGameOver = false
@@ -1295,6 +1334,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         runStats = RunStats()
         score = 0
         gameOverTimer = 0
+        spawnBlockedRetries = 0
         lastUpdateTime = 0
         lastWarningBeep = 0
         comboCount = 0
