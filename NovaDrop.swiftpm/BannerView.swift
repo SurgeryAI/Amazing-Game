@@ -1,28 +1,28 @@
 import SwiftUI
 import GoogleMobileAds
 
+/// Bottom banner.
+///
+/// Two fixes over the previous version: the ad unit IDs now live in `AdUnits`
+/// (so the stale `#warning` about a placeholder ID — which had in fact already
+/// been replaced — no longer fires on every release build), and the root view
+/// controller is resolved from the genuinely active scene rather than
+/// `connectedScenes.first`.
 struct BannerView: UIViewRepresentable {
+
     func makeUIView(context: Context) -> GADBannerView {
         let banner = GADBannerView(adSize: GADAdSizeBanner)
-        
-        #if DEBUG
-        // Google Official Test Ad Unit ID for Banners guarantees no false-click bans
-        banner.adUnitID = "ca-app-pub-3940256099942544/2934735716"
-        #else
-        // Replace with your actual Production Banner Ad Unit ID before shipping.
-        // The compiler warning below will remind you if this placeholder is still present.
-        #warning("Replace YOUR_PRODUCTION_AD_UNIT_ID with your real AdMob banner unit ID before release.")
-        banner.adUnitID = "ca-app-pub-6432429930581606/6568763063"
-        #endif
-        
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let rootVC = windowScene.windows.first?.rootViewController {
-            banner.rootViewController = rootVC
-        }
-        
+        banner.adUnitID = AdUnits.banner
+        banner.rootViewController = AdPresenter.rootViewController
         banner.load(GADRequest())
         return banner
     }
-    
-    func updateUIView(_ uiView: GADBannerView, context: Context) {}
+
+    func updateUIView(_ uiView: GADBannerView, context: Context) {
+        // The root view controller is nil on the very first layout pass in
+        // some launch sequences; recover it once the window exists.
+        if uiView.rootViewController == nil {
+            uiView.rootViewController = AdPresenter.rootViewController
+        }
+    }
 }

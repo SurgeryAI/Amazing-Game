@@ -1,33 +1,66 @@
 import SwiftUI
 import SpriteKit
 
-struct ContentView: View {
-    @State private var score: Int = 0
-    @State private var showGameOver: Bool = false
-    @State private var showTutorial: Bool = !UserDefaults.standard.bool(forKey: "HasSeenTutorial")
-    @StateObject private var scoreManager = ScoreManager.shared
-    @State private var nextTier: CelestialTier = .dust
-    @State private var nextPolarity: Polarity = .neutral
-    @State private var scoreBump: Bool = false
-    @State private var comboLevel: Int = 0
-    @State private var comboResetToken: Int = 0
-    
-    @State private var gameScene: GameScene = {
+/// Holds the one and only `GameScene` for the app's lifetime.
+///
+/// A `@State` initialiser closure is re-evaluated on every view init, which
+/// quietly built (and threw away) a fresh SpriteKit scene on each SwiftUI
+/// update. `@StateObject` guarantees exactly one.
+final class SceneHolder: ObservableObject {
+    let scene: GameScene = {
         let scene = GameScene()
         scene.scaleMode = .resizeFill
+        scene.anchorPoint = CGPoint(x: 0, y: 0)
         return scene
     }()
-    
-    private var polarityColor: Color {
-        switch nextPolarity {
-        case .positive: return .cyan
-        case .negative: return .orange
-        case .neutral:  return .clear
-        }
+}
+
+struct ContentView: View {
+
+    enum Screen {
+        case home
+        case playing
     }
 
-    private var glowColorForNext: Color {
-        nextPolarity == .neutral ? Color(uiColor: nextTier.glowColor) : polarityColor
+    enum GameOverPhase {
+        case offerSecondChance
+        case results
+    }
+
+    @StateObject private var sceneHolder = SceneHolder()
+    @StateObject private var scoreManager = ScoreManager.shared
+    @StateObject private var progress = ProgressManager.shared
+    @StateObject private var settings = GameSettings.shared
+    @StateObject private var rewarded = RewardedAdManager.shared
+
+    @State private var screen: Screen = .home
+    @State private var mode: GameMode = .endless
+
+    @State private var score = 0
+    @State private var nextTier: CelestialTier = .dust
+    @State private var nextPolarity: Polarity = .neutral
+    @State private var comboLevel = 0
+    @State private var comboToken = 0
+    @State private var danger: Double = 0
+    @State private var scoreBump = false
+
+    @State private var showGameOver = false
+    @State private var gameOverPhase: GameOverPhase = .results
+    @State private var showPause = false
+    @State private var showTutorial = false
+    @State private var showSettings = false
+    @State private var showStore = false
+    @State private var isWatchingAd = false
+
+    @State private var lastRun: RunStats?
+    @State private var runFinalised = false
+    @State private var isNewBest = false
+    @State private var freshMissions: [Mission] = []
+
+    private var scene: GameScene { sceneHolder.scene }
+
+    private var isPlaying: Bool {
+        screen == .playing && !showGameOver && !showPause && !showTutorial && !isWatchingAd
     }
 
     private var comboColor: Color {
@@ -38,266 +71,395 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Body
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            
-            SpriteView(scene: gameScene)
-                .allowsHitTesting(!showTutorial && !showGameOver)
 
-            // Combo heat: an escalating edge glow during merge chains.
-            if comboLevel > 1 {
+            SpriteView(scene: scene, isPaused: !isPlaying)
+                .ignoresSafeArea()
+                .allowsHitTesting(isPlaying)
+
+            comboGlow
+            dangerGlow
+
+            if screen == .playing {
+                playingChrome
+            }
+
+            if screen == .home {
+                HomeView(
+                    onPlayEndless: { start(mode: .endless) },
+                    onPlayDaily: { start(mode: DailyChallenge.today().mode) },
+                    onOpenStore: { showStore = true },
+                    onOpenSettings: { showSettings = true },
+                    onHowToPlay: { showTutorial = true }
+                )
+                .transition(.opacity)
+            }
+
+            if showTutorial {
+                TutorialView {
+                    settings.hasSeenTutorial = true
+                    withAnimation { showTutorial = false }
+                }
+                .zIndex(10)
+            }
+
+            if showPause {
+                PauseView(
+                    onResume: { withAnimation { showPause = false } },
+                    onRestart: {
+                        withAnimation { showPause = false }
+                        restartCurrentMode()
+                    },
+                    onQuit: { returnHome() },
+                    onSettings: { showSettings = true }
+                )
+                .zIndex(11)
+            }
+
+            if showGameOver, let run = lastRun {
+                gameOverLayer(run: run)
+                    .zIndex(12)
+            }
+
+            if showSettings {
+                SettingsView { showSettings = false }
+                    .zIndex(20)
+            }
+
+            if showStore {
+                StoreView { showStore = false }
+                    .zIndex(20)
+            }
+
+            if isWatchingAd {
+                Color.black.opacity(0.55).ignoresSafeArea()
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .tint(.white)
+                    .scaleEffect(1.4)
+                    .zIndex(30)
+            }
+        }
+        .onAppear(perform: wireScene)
+    }
+
+    // MARK: - Chrome while playing
+
+    private var playingChrome: some View {
+        VStack(spacing: 0) {
+            hud
+                .padding(.horizontal)
+                .padding(.top, 6)
+
+            Spacer()
+
+            BannerView()
+                .frame(height: Layout.bannerHeight)
+        }
+    }
+
+    private var hud: some View {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(mode.isDaily ? "DAILY" : "SCORE")
+                    .font(.caption.weight(.heavy))
+                    .foregroundColor(.gray)
+                Text("\(score)")
+                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .scaleEffect(scoreBump ? 1.16 : 1.0, anchor: .leading)
+                if comboLevel > 1 {
+                    Text("\(comboLevel)x CHAIN")
+                        .font(.caption2.weight(.black))
+                        .foregroundColor(comboColor)
+                        .transition(.scale.combined(with: .opacity))
+                }
+            }
+
+            Spacer(minLength: 4)
+
+            VStack(spacing: 3) {
+                Text("NEXT")
+                    .font(.caption.weight(.heavy))
+                    .foregroundColor(.gray)
+                NextOrbView(tier: nextTier, polarity: nextPolarity, diameter: 38)
+            }
+
+            Spacer(minLength: 4)
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("BEST")
+                    .font(.caption.weight(.heavy))
+                    .foregroundColor(.gray)
+                Text("\(mode.isDaily ? scoreManager.dailyChallengeBest : scoreManager.bestScore)")
+                    .font(.system(size: 20, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white)
+
+                Button {
+                    HapticManager.shared.tick()
+                    AudioManager.shared.play(.tap, volume: 0.5)
+                    withAnimation { showPause = true }
+                } label: {
+                    Image(systemName: "pause.circle.fill")
+                        .font(.title2)
+                        .foregroundColor(.white.opacity(0.75))
+                }
+                .padding(.top, 2)
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color.black.opacity(0.55))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                )
+        )
+    }
+
+    private var comboGlow: some View {
+        Group {
+            if comboLevel > 1 && !settings.reducedFlash {
                 Rectangle()
                     .stroke(comboColor, lineWidth: 90)
                     .blur(radius: 45)
-                    .opacity(min(Double(comboLevel) / 6.0, 1.0) * 0.65)
+                    .opacity(min(Double(comboLevel) / 6.0, 1.0) * 0.55)
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
-                    .transition(.opacity)
             }
+        }
+    }
 
-            VStack {
-                HStack {
-                    VStack(alignment: .leading) {
-                        Text("SCORE")
-                            .font(.headline)
-                            .foregroundColor(.gray)
-                        Text("\(score)")
-                            .font(.system(size: 32, weight: .bold, design: .rounded))
-                            .foregroundColor(.white)
-                            .scaleEffect(scoreBump ? 1.18 : 1.0, anchor: .leading)
-                            .onChange(of: score) { _ in
-                                withAnimation(.spring(response: 0.18, dampingFraction: 0.5)) {
-                                    scoreBump = true
-                                }
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-                                    withAnimation(.spring(response: 0.25, dampingFraction: 0.6)) {
-                                        scoreBump = false
-                                    }
-                                }
-                            }
-                    }
-                    Spacer()
-                    VStack {
-                        Text("NEXT")
-                            .font(.headline)
-                            .foregroundColor(.gray)
-                        ZStack {
-                            Circle()
-                                .fill(nextTier.gradient)
-                                .overlay(
-                                    Circle().stroke(polarityColor.opacity(nextPolarity == .neutral ? 0 : 0.9), lineWidth: 2)
-                                )
-                                .frame(width: 40, height: 40)
-                                .shadow(color: glowColorForNext.opacity(0.9), radius: 10)
-                            if nextPolarity != .neutral {
-                                Text(nextPolarity == .positive ? "+" : "−")
-                                    .font(.system(size: 24, weight: .black, design: .rounded))
-                                    .foregroundColor(.white.opacity(0.9))
-                            }
-                        }
-                        .animation(.spring(), value: nextTier)
-                        .animation(.spring(), value: nextPolarity)
-                    }
-                    .frame(width: 80)
-                    Spacer()
-                    VStack(alignment: .trailing) {
-                        Text("BEST")
-                            .font(.headline)
-                            .foregroundColor(.gray)
-                        Text("\(scoreManager.bestScore)")
-                            .font(.system(size: 24, weight: .semibold, design: .rounded))
-                            .foregroundColor(.white)
-                    }
-                }
-                .padding()
-                .background(
-                    RoundedRectangle(cornerRadius: 15)
-                        .fill(Color.black.opacity(0.6))
-                        .background(BlurView(style: .systemThinMaterialDark).clipShape(RoundedRectangle(cornerRadius: 15)))
-                )
-                .padding()
-                
-                Spacer()
-                
-                BannerView()
-                    .frame(height: 50)
+    private var dangerGlow: some View {
+        Group {
+            if danger > 0.05 && screen == .playing {
+                Rectangle()
+                    .stroke(Color.red, lineWidth: 110)
+                    .blur(radius: 55)
+                    .opacity(danger * 0.7)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                    .animation(.easeOut(duration: 0.25), value: danger)
             }
-            
-            if showGameOver {
-                GameOverView(score: score, scoreManager: scoreManager) {
-                    showGameOver = false
-                    comboLevel = 0
-                    gameScene.resetGame()
-                    
-                    // Show interstitial ad after a short delay to let the UI fade away
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        InterstitialAdManager.shared.showAd()
-                    }
+        }
+    }
+
+    // MARK: - Game over
+
+    @ViewBuilder
+    private func gameOverLayer(run: RunStats) -> some View {
+        switch gameOverPhase {
+        case .offerSecondChance:
+            SecondChanceView(
+                score: run.finalScore,
+                onWatch: { takeSecondChance() },
+                onDecline: {
+                    finaliseRun()
+                    withAnimation { gameOverPhase = .results }
                 }
-            } else if showTutorial {
-                TutorialView {
-                    withAnimation {
-                        UserDefaults.standard.set(true, forKey: "HasSeenTutorial")
-                        showTutorial = false
-                    }
+            )
+        case .results:
+            GameOverView(
+                run: run,
+                mode: mode,
+                isNewBest: isNewBest,
+                completedMissions: freshMissions,
+                scoreManager: scoreManager,
+                progress: progress,
+                onRetry: {
+                    showInterstitialThen { restartCurrentMode() }
+                },
+                onHome: {
+                    showInterstitialThen { returnHome() }
+                }
+            )
+        }
+    }
+
+    // MARK: - Wiring
+
+    private func wireScene() {
+        guard scene.onGameOver == nil else { return }   // wire exactly once
+
+        scene.onScoreChanged = { newScore in
+            score = newScore
+            withAnimation(.spring(response: 0.18, dampingFraction: 0.5)) { scoreBump = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                withAnimation(.spring(response: 0.25, dampingFraction: 0.6)) { scoreBump = false }
+            }
+        }
+
+        scene.onNextTierChanged = { tier, polarity in
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                nextTier = tier
+                nextPolarity = polarity
+            }
+        }
+
+        scene.onComboChanged = { combo in
+            guard combo > 1 else {
+                withAnimation { comboLevel = 0 }
+                return
+            }
+            withAnimation(.easeOut(duration: 0.12)) { comboLevel = combo }
+            comboToken += 1
+            let token = comboToken
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.7) {
+                if token == comboToken {
+                    withAnimation(.easeOut(duration: 0.4)) { comboLevel = 0 }
                 }
             }
         }
-        .onAppear {
-            _ = InterstitialAdManager.shared // Preload the interstitial ad
-            
-            gameScene.onScoreChanged = { newScore in
-                self.score = newScore
-            }
-            gameScene.onGameOver = {
-                scoreManager.submitScore(self.score)
-                withAnimation { self.comboLevel = 0 }
-                withAnimation {
-                    self.showGameOver = true
-                }
-            }
-            gameScene.onNextTierChanged = { tier, polarity in
-                self.nextTier = tier
-                self.nextPolarity = polarity
-            }
-            gameScene.onComboChanged = { combo in
-                guard combo > 1 else { return }
-                withAnimation(.easeOut(duration: 0.12)) { self.comboLevel = combo }
-                self.comboResetToken += 1
-                let token = self.comboResetToken
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.7) {
-                    if token == self.comboResetToken {
-                        withAnimation(.easeOut(duration: 0.4)) { self.comboLevel = 0 }
-                    }
-                }
-            }
-            self.nextTier = gameScene.currentNextTier
-            self.nextPolarity = gameScene.currentNextPolarity
+
+        scene.onDangerChanged = { value in
+            danger = value
         }
+
+        scene.onGameOver = { stats in
+            handleGameOver(stats)
+        }
+    }
+
+    // MARK: - Flow
+
+    private func start(mode newMode: GameMode) {
+        mode = newMode
+        scene.configure(mode: newMode)
+        resetRunState()
+        scene.resetGame()
+        withAnimation(.easeOut(duration: 0.25)) {
+            screen = .playing
+        }
+        if !settings.hasSeenTutorial {
+            showTutorial = true
+        }
+        AudioManager.shared.play(.tap, volume: 0.6)
+    }
+
+    private func restartCurrentMode() {
+        resetRunState()
+        scene.resetGame()
+        screen = .playing
+    }
+
+    private func returnHome() {
+        resetRunState()
+        withAnimation(.easeOut(duration: 0.25)) {
+            screen = .home
+        }
+    }
+
+    private func resetRunState() {
+        showGameOver = false
+        showPause = false
+        gameOverPhase = .results
+        lastRun = nil
+        runFinalised = false
+        isNewBest = false
+        freshMissions = []
+        comboLevel = 0
+        danger = 0
+        score = 0
+    }
+
+    private func handleGameOver(_ stats: RunStats) {
+        lastRun = stats
+        runFinalised = false
+
+        // A Second Chance is only offered when it is genuinely available: not
+        // in a Daily Challenge, not twice in a run, not on a zero score, and
+        // only when an ad is actually loaded — a button that fails to deliver
+        // is worse than no button.
+        let canOffer = scene.canOfferSecondChance
+            && stats.finalScore > 0
+            && rewarded.isReady
+
+        if canOffer {
+            gameOverPhase = .offerSecondChance
+        } else {
+            finaliseRun()
+            gameOverPhase = .results
+        }
+        withAnimation { showGameOver = true }
+    }
+
+    /// Banks the run exactly once: leaderboards, missions, shards.
+    private func finaliseRun() {
+        guard let stats = lastRun, !runFinalised else { return }
+        runFinalised = true
+
+        let dailyCompleted = stats.isDaily && stats.finalScore > 0
+        isNewBest = scoreManager.submit(score: stats.finalScore,
+                                        mode: mode,
+                                        assisted: stats.wasAssisted)
+        freshMissions = progress.applyRun(stats, dailyCompleted: dailyCompleted)
+        InterstitialAdManager.shared.noteRunFinished()
+
+        if !freshMissions.isEmpty {
+            AudioManager.shared.play(.unlock, volume: 0.8)
+        }
+    }
+
+    private func takeSecondChance() {
+        isWatchingAd = true
+        InterstitialAdManager.shared.noteFullScreenAdShown()
+        rewarded.show { earned in
+            isWatchingAd = false
+            if earned {
+                // The run resumes with its score intact — but it is now flagged
+                // as assisted, so it will bank to the Marathon board.
+                withAnimation { showGameOver = false }
+                gameOverPhase = .results
+                runFinalised = false
+                scene.grantSecondChance()
+            } else {
+                finaliseRun()
+                withAnimation { gameOverPhase = .results }
+            }
+        }
+    }
+
+    private func showInterstitialThen(_ action: @escaping () -> Void) {
+        // Read the flag *before* running the action, which resets run state.
+        let wasPersonalBest = isNewBest
+        InterstitialAdManager.shared.showAdIfAppropriate(isPersonalBest: wasPersonalBest)
+        action()
     }
 }
 
-struct GameOverView: View {
-    let score: Int
-    @ObservedObject var scoreManager: ScoreManager
-    let onRetry: () -> Void
-    
-    private let medals = ["🥇", "🥈", "🥉"]
-    
+// MARK: - Small shared pieces
+
+struct NextOrbView: View {
+    let tier: CelestialTier
+    let polarity: Polarity
+    var diameter: CGFloat = 40
+
     var body: some View {
         ZStack {
-            Color.black.opacity(0.8).ignoresSafeArea()
-            
-            VStack(spacing: 0) {
-                ScrollView(.vertical, showsIndicators: false) {
-                    VStack(spacing: 18) {
-                        Text("COSMOS FULL")
-                            .font(.system(size: 36, weight: .black))
-                            .foregroundColor(.white)
-                        
-                        // Current score
-                        Text("\(score)")
-                            .font(.system(size: 48, weight: .heavy, design: .rounded))
-                            .foregroundStyle(
-                                LinearGradient(colors: [.cyan, .purple], startPoint: .leading, endPoint: .trailing)
-                            )
-                        
-                        if score == scoreManager.allTimeTop3.first ?? 0, score > 0 {
-                            Text("🎉 NEW ALL-TIME BEST!")
-                                .font(.subheadline.weight(.heavy))
-                                .foregroundColor(.yellow)
-                        }
-                        
-                        // Leaderboard columns
-                        HStack(alignment: .top, spacing: 16) {
-                            // All-Time
-                            leaderboardColumn(
-                                title: "ALL-TIME",
-                                icon: "crown.fill",
-                                iconColor: .yellow,
-                                scores: scoreManager.allTimeTop3
-                            )
-                            
-                            // Divider
-                            Rectangle()
-                                .fill(Color.white.opacity(0.15))
-                                .frame(width: 1)
-                                .padding(.vertical, 4)
-                            
-                            // Today
-                            leaderboardColumn(
-                                title: "TODAY",
-                                icon: "sun.max.fill",
-                                iconColor: .orange,
-                                scores: scoreManager.todayTop3
-                            )
-                        }
-                        .padding()
-                        .background(
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(Color.white.opacity(0.06))
-                        )
-                    }
-                    .padding(.top, 24)
-                    .padding(.horizontal, 24)
-                }
-                
-                Button(action: onRetry) {
-                    Text("TRY AGAIN")
-                        .font(.headline)
-                        .foregroundColor(.black)
-                        .padding()
-                        .frame(maxWidth: .infinity)
-                        .background(
-                            LinearGradient(colors: [.cyan, .purple], startPoint: .leading, endPoint: .trailing)
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: 15))
-                }
-                .padding(.horizontal, 30)
-                .padding(.bottom, 24)
-                .padding(.top, 12)
-            }
-            .frame(maxHeight: UIScreen.main.bounds.height * 0.70)
-            .background(BlurView(style: .systemMaterialDark))
-            .clipShape(RoundedRectangle(cornerRadius: 25))
-            .shadow(color: .purple.opacity(0.5), radius: 20, x: 0, y: 0)
-            .padding(20)
-        }
-    }
-    
-    @ViewBuilder
-    private func leaderboardColumn(title: String, icon: String, iconColor: Color, scores: [Int]) -> some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 5) {
-                Image(systemName: icon)
-                    .foregroundColor(iconColor)
-                    .font(.caption)
-                Text(title)
-                    .font(.caption.weight(.heavy))
-                    .foregroundColor(.gray)
-            }
-            
-            if scores.isEmpty {
-                Text("—")
-                    .font(.title3)
-                    .foregroundColor(.gray.opacity(0.5))
-                    .frame(maxWidth: .infinity)
-            } else {
-                ForEach(Array(scores.enumerated()), id: \.offset) { index, s in
-                    HStack {
-                        Text(medals[index])
-                            .font(.body)
-                        Spacer()
-                        Text("\(s)")
-                            .font(.system(size: 18, weight: .bold, design: .rounded))
-                            .foregroundColor(index == 0 ? .white : .white.opacity(0.7))
-                    }
-                    .padding(.horizontal, 6)
-                }
+            Circle()
+                .fill(tier.gradient)
+                .overlay(
+                    Circle().stroke(polarity == .neutral
+                                    ? Color(uiColor: tier.glowColor).opacity(0.6)
+                                    : polarity.color.opacity(0.95),
+                                    lineWidth: 2)
+                )
+                .frame(width: diameter, height: diameter)
+                .shadow(color: polarity == .neutral
+                        ? Color(uiColor: tier.glowColor).opacity(0.85)
+                        : polarity.color.opacity(0.85),
+                        radius: 9)
+            if polarity != .neutral {
+                Text(polarity.symbol)
+                    .font(.system(size: diameter * 0.6, weight: .black, design: .rounded))
+                    .foregroundColor(.white.opacity(0.92))
             }
         }
-        .frame(maxWidth: .infinity)
     }
 }
 
@@ -309,76 +471,63 @@ struct BlurView: UIViewRepresentable {
     func updateUIView(_ uiView: UIVisualEffectView, context: Context) {}
 }
 
-struct TutorialView: View {
-    let onDismiss: () -> Void
-    
+/// The app's one button style, so every screen matches.
+struct CosmicButton: View {
+    let title: String
+    var systemImage: String? = nil
+    var colors: [Color] = [.cyan, .purple]
+    var isProminent: Bool = true
+    let action: () -> Void
+
+    var body: some View {
+        Button {
+            HapticManager.shared.tick()
+            AudioManager.shared.play(.tap, volume: 0.6)
+            action()
+        } label: {
+            HStack(spacing: 8) {
+                if let systemImage = systemImage {
+                    Image(systemName: systemImage)
+                }
+                Text(title)
+            }
+            .font(.headline)
+            .foregroundColor(isProminent ? .black : .white)
+            .padding(.vertical, 14)
+            .frame(maxWidth: .infinity)
+            .background(
+                Group {
+                    if isProminent {
+                        LinearGradient(colors: colors, startPoint: .leading, endPoint: .trailing)
+                    } else {
+                        Color.white.opacity(0.10)
+                    }
+                }
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+    }
+}
+
+/// A dimmed, blurred card used by every modal in the game.
+struct ModalCard<Content: View>: View {
+    var maxHeightFraction: CGFloat = 0.8
+    @ViewBuilder var content: () -> Content
+
     var body: some View {
         ZStack {
-            Color.black.opacity(0.8).ignoresSafeArea()
-            
+            Color.black.opacity(0.82).ignoresSafeArea()
             VStack(spacing: 0) {
-                ScrollView(.vertical, showsIndicators: false) {
-                    VStack(spacing: 25) {
-                        Text("HOW TO PLAY")
-                            .font(.system(size: 32, weight: .black))
-                            .foregroundColor(.white)
-                        
-                        VStack(alignment: .leading, spacing: 20) {
-                            HStack(alignment: .top) {
-                                Image(systemName: "hand.point.up.left.fill")
-                                    .foregroundColor(.cyan)
-                                    .font(.title)
-                                    .frame(width: 36)
-                                Text("1. Tap and drag left or right at the top of the screen to aim your celestial body, then release to drop it.")
-                                    .foregroundColor(.white)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            
-                            HStack(alignment: .top) {
-                                Image(systemName: "sparkles")
-                                    .foregroundColor(.yellow)
-                                    .font(.title)
-                                    .frame(width: 36)
-                                Text("2. When two identical bodies touch (like two Moons), they merge into a bigger, heavier body and you gain points!")
-                                    .foregroundColor(.white)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            
-                            HStack(alignment: .top) {
-                                Image(systemName: "exclamationmark.triangle.fill")
-                                    .foregroundColor(.red)
-                                    .font(.title)
-                                    .frame(width: 36)
-                                Text("3. Don't let your universe fill up! If objects pile up past the faint line at the top, the cosmos overflows and the game is over.")
-                                    .foregroundColor(.white)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-                        .padding()
-                    }
-                    .padding(.top, 30)
-                    .padding(.horizontal, 30)
-                }
-                
-                Button(action: onDismiss) {
-                    Text("GOT IT! LET'S PLAY")
-                        .font(.headline)
-                        .foregroundColor(.black)
-                        .padding()
-                        .frame(maxWidth: .infinity)
-                        .background(
-                            LinearGradient(colors: [.cyan, .purple], startPoint: .leading, endPoint: .trailing)
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: 15))
-                }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 30)
-                .padding(.top, 10)
+                content()
             }
-            .frame(maxHeight: UIScreen.main.bounds.height * 0.75)
+            .frame(maxHeight: UIScreen.main.bounds.height * maxHeightFraction)
             .background(BlurView(style: .systemMaterialDark))
-            .clipShape(RoundedRectangle(cornerRadius: 25))
-            .shadow(color: .purple.opacity(0.3), radius: 20, x: 0, y: 0)
+            .clipShape(RoundedRectangle(cornerRadius: 26))
+            .overlay(
+                RoundedRectangle(cornerRadius: 26)
+                    .stroke(Color.white.opacity(0.10), lineWidth: 1)
+            )
+            .shadow(color: .purple.opacity(0.45), radius: 22)
             .padding(20)
         }
     }
