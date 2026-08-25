@@ -120,7 +120,7 @@ enum DailyModifier: Int, CaseIterable {
         switch self {
         case .magneticStorm: return 100
         case .calmVoid:      return 0
-        default:             return 50
+        default:             return 22
         }
     }
 

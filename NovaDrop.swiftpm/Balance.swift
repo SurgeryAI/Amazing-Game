@@ -70,7 +70,7 @@ enum Balance {
     // MARK: - Scoring
 
     /// Seconds within which a second merge continues a chain.
-    static let comboWindow: TimeInterval = 1.5
+    static let comboWindow: TimeInterval = 1.1
     /// Flat bonus for a Big Crunch, before the combo multiplier.
     static let bigCrunchBonus = 250
     /// Bonus per body swallowed by a Big Crunch.
@@ -81,10 +81,10 @@ enum Balance {
     /// Multiplier on every body radius.
     ///
     /// The single cleanest difficulty knob: capacity falls with the square of
-    /// this, so 1.15 leaves the board holding about a quarter fewer bodies
+    /// this, so 1.20 leaves the board holding significantly fewer bodies
     /// without moving the danger line or changing the layout. Raise it to
     /// tighten the game, lower it to open it up.
-    static let bodyScale: CGFloat = 1.15
+    static let bodyScale: CGFloat = 1.20
 
     // MARK: - Drops
 
@@ -108,13 +108,9 @@ enum Balance {
 
     /// Relative likelihood of each droppable tier, Dust first.
     ///
-    /// A uniform roll over the unlocked range handed out a Gas Giant on one
-    /// drop in five — fifteen Dust worth of area, for free. It let a player
-    /// climb the ladder without doing the merging that is supposed to be the
-    /// entire game. Weighted toward the small end, big bodies have to be
-    /// earned, and the board clogs with the small orphans that make a merge
-    /// game tense.
-    static let dropWeights: [Int] = [34, 28, 22, 12, 4]
+    /// Heavily weighted toward smaller tiers so larger celestial bodies must be
+    /// earned by strategic merging rather than handed out for free.
+    static let dropWeights: [Int] = [44, 30, 18, 6, 2]
     /// How long an unstable orb waits before it starts shaking.
     static let unstableFuse: TimeInterval = 3.0
 
@@ -136,7 +132,7 @@ enum Balance {
     /// Body friction. Higher means bodies slide into gaps less readily, so a
     /// pile packs loosely and climbs faster — difficulty without touching the
     /// size of the play area.
-    static let bodyFriction: CGFloat = 0.45
+    static let bodyFriction: CGFloat = 0.75
 
     // MARK: - Forces
 
@@ -152,16 +148,15 @@ enum Balance {
 
     // MARK: - Blasts
 
-    static let antimatterReach: CGFloat = 120
+    static let antimatterReach: CGFloat = 75
     /// Bodies an antimatter blast must clear before it leaves a bounce pad.
     static let bouncePadThreshold = 4
     static let bouncePadLifetime: TimeInterval = 12
     /// Reach of a Big Crunch.
     ///
-    /// Was 260, which cleared 94% of the board — a reset button that made a
-    /// good run unloseable. At 200 it still takes out half the cosmos and
-    /// remains the best thing that can happen in a run, without erasing it.
-    static let bigCrunchReach: CGFloat = 200
+    /// Reduced reach so black hole collisions clear local clusters rather than
+    /// wiping the entire board.
+    static let bigCrunchReach: CGFloat = 130
     /// Bodies removed from the top of the stack by a Second Chance.
     static let secondChancePurgeCount = 6
 
@@ -180,5 +175,5 @@ enum Balance {
     static let dailyAntimatterDrop = 40
 
     /// Percent chance a fresh drop is antimatter, once unlocked.
-    static let antimatterChance = 3
+    static let antimatterChance = 1
 }
