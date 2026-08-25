@@ -87,69 +87,120 @@ enum FX {
     // MARK: - Procedural Sphere Renderers
 
     private static func drawAsteroid(cg: CGContext, radius: CGFloat, centre: CGPoint, baseColor: UIColor, glowColor: UIColor, isDust: Bool) {
-        let lightPos = CGPoint(x: radius * 0.65, y: radius * 0.60)
-        let darkColor = baseColor.darkened(by: 0.55)
-        let brightColor = baseColor.lightened(by: 0.35)
+        let lightPos = CGPoint(x: radius * 0.55, y: radius * 0.45)
+        let darkColor = baseColor.darkened(by: 0.65)
+        let midColor = baseColor.darkened(by: 0.25)
+        let brightColor = baseColor.lightened(by: 0.40)
+        let facetColor = baseColor.lightened(by: 0.15)
 
-        let colors = [brightColor.cgColor, baseColor.cgColor, darkColor.cgColor] as CFArray
+        // 1. Base rocky stone gradient
+        let colors = [brightColor.cgColor, midColor.cgColor, darkColor.cgColor] as CFArray
         if let grad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0.0, 0.45, 1.0]) {
             cg.drawRadialGradient(grad, startCenter: lightPos, startRadius: 0, endCenter: centre, endRadius: radius, options: [])
         }
 
-        // Craters
-        let count = isDust ? 3 : 6
-        let craterCoords: [(x: CGFloat, y: CGFloat, r: CGFloat)] = [
-            (0.35, 0.40, 0.22), (0.70, 0.30, 0.16), (0.55, 0.70, 0.20),
-            (0.25, 0.75, 0.14), (0.80, 0.65, 0.18), (0.45, 0.22, 0.12)
+        // 2. Chiseled, faceted rocky planes (creates real 3D irregular asteroid contours)
+        cg.saveGState()
+        let facets: [[CGPoint]] = [
+            [CGPoint(x: 0.2, y: 0.3), CGPoint(x: 0.5, y: 0.15), CGPoint(x: 0.45, y: 0.5)],
+            [CGPoint(x: 0.45, y: 0.5), CGPoint(x: 0.5, y: 0.15), CGPoint(x: 0.8, y: 0.35), CGPoint(x: 0.7, y: 0.6)],
+            [CGPoint(x: 0.7, y: 0.6), CGPoint(x: 0.8, y: 0.35), CGPoint(x: 0.95, y: 0.6), CGPoint(x: 0.85, y: 0.85)],
+            [CGPoint(x: 0.3, y: 0.75), CGPoint(x: 0.45, y: 0.5), CGPoint(x: 0.7, y: 0.6), CGPoint(x: 0.6, y: 0.9)],
+            [CGPoint(x: 0.1, y: 0.6), CGPoint(x: 0.2, y: 0.3), CGPoint(x: 0.45, y: 0.5), CGPoint(x: 0.3, y: 0.75)]
         ]
 
-        for i in 0..<min(count, craterCoords.count) {
-            let (rx, ry, rr) = craterCoords[i]
-            let cPos = CGPoint(x: radius * 2 * rx, y: radius * 2 * ry)
-            let cRad = radius * rr
-            let cRect = CGRect(x: cPos.x - cRad, y: cPos.y - cRad, width: cRad * 2, height: cRad * 2)
+        let facetShades = [
+            brightColor.withAlphaComponent(0.45),
+            facetColor.withAlphaComponent(0.35),
+            darkColor.withAlphaComponent(0.50),
+            darkColor.withAlphaComponent(0.65),
+            midColor.withAlphaComponent(0.30)
+        ]
 
-            cg.setFillColor(darkColor.darkened(by: 0.4).cgColor)
-            cg.fillEllipse(in: cRect)
-
-            // Inner shadow
-            cg.setStrokeColor(UIColor.black.withAlphaComponent(0.5).cgColor)
-            cg.setLineWidth(max(1.0, cRad * 0.25))
-            cg.strokeEllipse(in: cRect)
-
-            // Crater rim highlight
-            cg.setStrokeColor(brightColor.withAlphaComponent(0.6).cgColor)
-            cg.setLineWidth(max(1.0, cRad * 0.18))
-            cg.strokeEllipse(in: CGRect(x: cRect.minX + cRad * 0.2, y: cRect.minY + cRad * 0.2, width: cRect.width * 0.85, height: cRect.height * 0.85))
+        for (idx, pts) in facets.enumerated() {
+            guard !pts.isEmpty else { continue }
+            cg.beginPath()
+            cg.move(to: CGPoint(x: pts[0].x * radius * 2, y: pts[0].y * radius * 2))
+            for p in pts.dropFirst() {
+                cg.addLine(to: CGPoint(x: p.x * radius * 2, y: p.y * radius * 2))
+            }
+            cg.closePath()
+            cg.setFillColor(facetShades[idx % facetShades.count].cgColor)
+            cg.fillPath()
         }
+
+        // 3. Natural rocky ridge lines and fissures
+        cg.setStrokeColor(darkColor.darkened(by: 0.4).withAlphaComponent(0.75).cgColor)
+        cg.setLineWidth(max(1.0, radius * 0.05))
+        for pts in facets {
+            guard !pts.isEmpty else { continue }
+            cg.beginPath()
+            cg.move(to: CGPoint(x: pts[0].x * radius * 2, y: pts[0].y * radius * 2))
+            for p in pts.dropFirst() {
+                cg.addLine(to: CGPoint(x: p.x * radius * 2, y: p.y * radius * 2))
+            }
+            cg.strokePath()
+        }
+
+        // 4. Subtle illuminated ridge highlights on sunward edges
+        cg.setStrokeColor(brightColor.withAlphaComponent(0.65).cgColor)
+        cg.setLineWidth(max(0.8, radius * 0.035))
+        cg.beginPath()
+        cg.move(to: CGPoint(x: 0.2 * radius * 2, y: 0.3 * radius * 2))
+        cg.addLine(to: CGPoint(x: 0.5 * radius * 2, y: 0.15 * radius * 2))
+        cg.addLine(to: CGPoint(x: 0.8 * radius * 2, y: 0.35 * radius * 2))
+        cg.strokePath()
+
+        // 5. Fine stony micro-craters (scattered and irregular, natural space rock look)
+        let microPits: [(x: CGFloat, y: CGFloat, r: CGFloat)] = isDust ? [
+            (0.38, 0.42, 0.08), (0.62, 0.58, 0.07), (0.75, 0.45, 0.06), (0.45, 0.68, 0.06)
+        ] : [
+            (0.32, 0.38, 0.09), (0.65, 0.32, 0.08), (0.52, 0.55, 0.11),
+            (0.72, 0.62, 0.07), (0.38, 0.72, 0.08), (0.82, 0.48, 0.06), (0.58, 0.78, 0.06)
+        ]
+
+        for pit in microPits {
+            let pRect = CGRect(x: (pit.x - pit.r) * radius * 2, y: (pit.y - pit.r) * radius * 2, width: pit.r * 4 * radius, height: pit.r * 4 * radius)
+            cg.setFillColor(darkColor.darkened(by: 0.5).withAlphaComponent(0.6).cgColor)
+            cg.fillEllipse(in: pRect)
+            cg.setStrokeColor(brightColor.withAlphaComponent(0.4).cgColor)
+            cg.setLineWidth(max(0.6, radius * 0.025))
+            cg.strokeEllipse(in: CGRect(x: pRect.minX, y: pRect.minY, width: pRect.width * 0.9, height: pRect.height * 0.9))
+        }
+        cg.restoreGState()
     }
 
     private static func drawMoon(cg: CGContext, radius: CGFloat, centre: CGPoint, baseColor: UIColor, glowColor: UIColor) {
-        let lightPos = CGPoint(x: radius * 0.65, y: radius * 0.55)
-        let highlight = baseColor.lightened(by: 0.45)
+        let lightPos = CGPoint(x: radius * 0.60, y: radius * 0.50)
+        let highlight = baseColor.lightened(by: 0.50)
+        let midTone = baseColor
         let shadow = baseColor.darkened(by: 0.65)
 
-        let colors = [highlight.cgColor, baseColor.cgColor, shadow.cgColor] as CFArray
-        if let grad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0.0, 0.5, 1.0]) {
+        // 1. Lunar gradient
+        let colors = [highlight.cgColor, midTone.cgColor, shadow.cgColor] as CFArray
+        if let grad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0.0, 0.45, 1.0]) {
             cg.drawRadialGradient(grad, startCenter: lightPos, startRadius: 0, endCenter: centre, endRadius: radius, options: [])
         }
 
-        // Lunar Maria (dark basalt plains)
-        cg.setFillColor(shadow.withAlphaComponent(0.55).cgColor)
-        cg.fillEllipse(in: CGRect(x: radius * 0.35, y: radius * 0.70, width: radius * 0.75, height: radius * 0.55))
-        cg.fillEllipse(in: CGRect(x: radius * 0.95, y: radius * 0.40, width: radius * 0.65, height: radius * 0.70))
+        // 2. Lunar Maria (feathery organic dark basalt seas)
+        cg.setFillColor(shadow.darkened(by: 0.25).withAlphaComponent(0.45).cgColor)
+        cg.fillEllipse(in: CGRect(x: radius * 0.35, y: radius * 0.55, width: radius * 0.75, height: radius * 0.60))
+        cg.fillEllipse(in: CGRect(x: radius * 0.85, y: radius * 0.35, width: radius * 0.65, height: radius * 0.50))
+        cg.fillEllipse(in: CGRect(x: radius * 0.60, y: radius * 0.95, width: radius * 0.70, height: radius * 0.55))
 
-        // Lunar Craters with ray systems
-        let craters: [(x: CGFloat, y: CGFloat, r: CGFloat)] = [
-            (0.6, 0.45, 0.24), (1.3, 0.7, 0.18), (0.75, 1.25, 0.22),
-            (1.2, 1.35, 0.16), (0.4, 1.1, 0.14)
+        // 3. Fine natural craters with ejecta rays
+        let lunarCraters: [(x: CGFloat, y: CGFloat, r: CGFloat)] = [
+            (0.55, 0.45, 0.10), (1.25, 0.65, 0.08), (0.75, 1.20, 0.09),
+            (1.15, 1.30, 0.07), (0.45, 1.05, 0.06), (0.85, 0.80, 0.08),
+            (1.35, 0.95, 0.06), (0.35, 0.75, 0.05)
         ]
-        for c in craters {
-            let rect = CGRect(x: c.x * radius - c.r * radius, y: c.y * radius - c.r * radius, width: c.r * radius * 2, height: c.r * radius * 2)
-            cg.setFillColor(shadow.darkened(by: 0.5).cgColor)
+
+        for c in lunarCraters {
+            let rect = CGRect(x: (c.x - c.r) * radius, y: (c.y - c.r) * radius, width: c.r * 2 * radius, height: c.r * 2 * radius)
+            cg.setFillColor(shadow.darkened(by: 0.4).withAlphaComponent(0.7).cgColor)
             cg.fillEllipse(in: rect)
-            cg.setStrokeColor(highlight.withAlphaComponent(0.7).cgColor)
-            cg.setLineWidth(max(1.0, radius * 0.04))
+            cg.setStrokeColor(highlight.withAlphaComponent(0.65).cgColor)
+            cg.setLineWidth(max(0.8, radius * 0.03))
             cg.strokeEllipse(in: rect)
         }
     }
@@ -299,11 +350,13 @@ enum FX {
             cg.drawRadialGradient(sGrad, startCenter: CGPoint(x: radius * 0.65, y: radius * 0.55), startRadius: radius * 0.2, endCenter: centre, endRadius: radius, options: [])
         }
 
-        // Specular highlight at 10 o'clock
-        let specCentre = CGPoint(x: radius * 0.65, y: radius * 0.55)
-        let specColors = [UIColor.white.withAlphaComponent(0.48).cgColor, UIColor.clear.cgColor] as CFArray
-        if let specGrad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: specColors, locations: [0.0, 1.0]) {
-            cg.drawRadialGradient(specGrad, startCenter: specCentre, startRadius: 0, endCenter: specCentre, endRadius: radius * 0.45, options: [])
+        // Specular highlight only for smooth watery/gas planets, not for matte asteroids
+        if tier != .dust && tier != .meteor {
+            let specCentre = CGPoint(x: radius * 0.65, y: radius * 0.55)
+            let specColors = [UIColor.white.withAlphaComponent(0.48).cgColor, UIColor.clear.cgColor] as CFArray
+            if let specGrad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: specColors, locations: [0.0, 1.0]) {
+                cg.drawRadialGradient(specGrad, startCenter: specCentre, startRadius: 0, endCenter: specCentre, endRadius: radius * 0.45, options: [])
+            }
         }
 
         // Atmospheric rim light
