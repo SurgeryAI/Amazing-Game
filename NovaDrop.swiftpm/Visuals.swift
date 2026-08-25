@@ -28,69 +28,305 @@ enum FX {
         return texture
     }
 
-    // MARK: - Orb shading
+    // MARK: - Celestial Sphere Shading & Textures
 
-    /// Rim light + specular highlight, baked into one cached texture per radius.
-    ///
-    /// These used to be two extra `SKShapeNode`s on every single body. Shape
-    /// nodes are the most expensive thing SpriteKit draws (no batching, and a
-    /// glow forces an offscreen pass), and a full board carried five of them
-    /// per orb. Collapsing the two decorative layers into one cached sprite
-    /// roughly halves the draw calls on a busy board without changing how a
-    /// single orb looks.
-    private static var shadingCache: [Int: SKTexture] = [:]
+    private static var celestialTextureCache: [String: SKTexture] = [:]
 
-    static func orbShading(radius: CGFloat) -> SKTexture? {
-        let key = Int(radius.rounded())
-        if let cached = shadingCache[key] { return cached }
+    static func celestialTexture(tier: CelestialTier, radius: CGFloat, theme: OrbTheme) -> SKTexture? {
+        let key = "\(tier.rawValue)_\(Int(radius.rounded()))_\(theme.rawValue)"
+        if let cached = celestialTextureCache[key] { return cached }
 
         let scale = UIScreen.main.scale
-        let diameter = max(2.0, radius * 2)
+        let diameter = max(4.0, radius * 2)
         let size = CGSize(width: diameter, height: diameter)
         let format = UIGraphicsImageRendererFormat.default()
         format.scale = scale
         format.opaque = false
 
+        let baseColor = theme.fillUIColor(for: tier)
+        let glowColor = theme.glowUIColor(for: tier)
+
         let image = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
             let cg = ctx.cgContext
+            let bounds = CGRect(x: 0, y: 0, width: diameter, height: diameter)
             let centre = CGPoint(x: radius, y: radius)
 
-            // Rim: a soft ring of light just inside the edge.
             cg.saveGState()
-            let rimColors = [UIColor.white.withAlphaComponent(0.0).cgColor,
-                             UIColor.white.withAlphaComponent(0.32).cgColor,
-                             UIColor.white.withAlphaComponent(0.0).cgColor] as CFArray
-            if let rimGrad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                                        colors: rimColors,
-                                        locations: [0.55, 0.88, 1.0]) {
-                cg.addEllipse(in: CGRect(x: 0, y: 0, width: diameter, height: diameter))
-                cg.clip()
-                cg.drawRadialGradient(rimGrad, startCenter: centre, startRadius: 0,
-                                      endCenter: centre, endRadius: radius, options: [])
-            }
-            cg.restoreGState()
+            cg.addEllipse(in: bounds)
+            cg.clip()
 
-            // Specular: a bright spot up and to the left, at roughly 10 o'clock.
-            cg.saveGState()
-            let specCentre = CGPoint(x: radius * 0.72, y: radius * 0.70)
-            let specRadius = radius * 0.55
-            let specColors = [UIColor.white.withAlphaComponent(0.52).cgColor,
-                              UIColor.white.withAlphaComponent(0.0).cgColor] as CFArray
-            if let specGrad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                                         colors: specColors,
-                                         locations: [0, 1]) {
-                cg.addEllipse(in: CGRect(x: 0, y: 0, width: diameter, height: diameter))
-                cg.clip()
-                cg.drawRadialGradient(specGrad, startCenter: specCentre, startRadius: 0,
-                                      endCenter: specCentre, endRadius: specRadius, options: [])
+            switch tier {
+            case .dust, .meteor:
+                drawAsteroid(cg: cg, radius: radius, centre: centre, baseColor: baseColor, glowColor: glowColor, isDust: tier == .dust)
+            case .moon:
+                drawMoon(cg: cg, radius: radius, centre: centre, baseColor: baseColor, glowColor: glowColor)
+            case .planet:
+                drawPlanet(cg: cg, radius: radius, centre: centre, baseColor: baseColor, glowColor: glowColor)
+            case .gasGiant:
+                drawGasGiant(cg: cg, radius: radius, centre: centre, baseColor: baseColor, glowColor: glowColor)
+            case .star:
+                drawStar(cg: cg, radius: radius, centre: centre, baseColor: baseColor, glowColor: glowColor)
+            case .blackHole:
+                drawBlackHole(cg: cg, radius: radius, centre: centre, baseColor: baseColor, glowColor: glowColor)
+            case .antimatter:
+                drawAntimatter(cg: cg, radius: radius, centre: centre, baseColor: baseColor, glowColor: glowColor)
             }
+
+            // Draw 3D spherical lighting overlay (specular and limb shadow)
+            draw3DShadingOverlay(cg: cg, radius: radius, centre: centre, tier: tier, glowColor: glowColor)
+
             cg.restoreGState()
         }
 
         let texture = SKTexture(image: image)
         texture.filteringMode = .linear
-        shadingCache[key] = texture
+        celestialTextureCache[key] = texture
         return texture
+    }
+
+    // MARK: - Procedural Sphere Renderers
+
+    private static func drawAsteroid(cg: CGContext, radius: CGFloat, centre: CGPoint, baseColor: UIColor, glowColor: UIColor, isDust: Bool) {
+        let lightPos = CGPoint(x: radius * 0.65, y: radius * 0.60)
+        let darkColor = baseColor.darkened(by: 0.55)
+        let brightColor = baseColor.lightened(by: 0.35)
+
+        let colors = [brightColor.cgColor, baseColor.cgColor, darkColor.cgColor] as CFArray
+        if let grad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0.0, 0.45, 1.0]) {
+            cg.drawRadialGradient(grad, startCenter: lightPos, startRadius: 0, endCenter: centre, endRadius: radius, options: [])
+        }
+
+        // Craters
+        let count = isDust ? 3 : 6
+        let craterCoords: [(x: CGFloat, y: CGFloat, r: CGFloat)] = [
+            (0.35, 0.40, 0.22), (0.70, 0.30, 0.16), (0.55, 0.70, 0.20),
+            (0.25, 0.75, 0.14), (0.80, 0.65, 0.18), (0.45, 0.22, 0.12)
+        ]
+
+        for i in 0..<min(count, craterCoords.count) {
+            let (rx, ry, rr) = craterCoords[i]
+            let cPos = CGPoint(x: radius * 2 * rx, y: radius * 2 * ry)
+            let cRad = radius * rr
+            let cRect = CGRect(x: cPos.x - cRad, y: cPos.y - cRad, width: cRad * 2, height: cRad * 2)
+
+            cg.setFillColor(darkColor.darkened(by: 0.4).cgColor)
+            cg.fillEllipse(in: cRect)
+
+            // Inner shadow
+            cg.setStrokeColor(UIColor.black.withAlphaComponent(0.5).cgColor)
+            cg.setLineWidth(max(1.0, cRad * 0.25))
+            cg.strokeEllipse(in: cRect)
+
+            // Crater rim highlight
+            cg.setStrokeColor(brightColor.withAlphaComponent(0.6).cgColor)
+            cg.setLineWidth(max(1.0, cRad * 0.18))
+            cg.strokeEllipse(in: CGRect(x: cRect.minX + cRad * 0.2, y: cRect.minY + cRad * 0.2, width: cRect.width * 0.85, height: cRect.height * 0.85))
+        }
+    }
+
+    private static func drawMoon(cg: CGContext, radius: CGFloat, centre: CGPoint, baseColor: UIColor, glowColor: UIColor) {
+        let lightPos = CGPoint(x: radius * 0.65, y: radius * 0.55)
+        let highlight = baseColor.lightened(by: 0.45)
+        let shadow = baseColor.darkened(by: 0.65)
+
+        let colors = [highlight.cgColor, baseColor.cgColor, shadow.cgColor] as CFArray
+        if let grad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0.0, 0.5, 1.0]) {
+            cg.drawRadialGradient(grad, startCenter: lightPos, startRadius: 0, endCenter: centre, endRadius: radius, options: [])
+        }
+
+        // Lunar Maria (dark basalt plains)
+        cg.setFillColor(shadow.withAlphaComponent(0.55).cgColor)
+        cg.fillEllipse(in: CGRect(x: radius * 0.35, y: radius * 0.70, width: radius * 0.75, height: radius * 0.55))
+        cg.fillEllipse(in: CGRect(x: radius * 0.95, y: radius * 0.40, width: radius * 0.65, height: radius * 0.70))
+
+        // Lunar Craters with ray systems
+        let craters: [(x: CGFloat, y: CGFloat, r: CGFloat)] = [
+            (0.6, 0.45, 0.24), (1.3, 0.7, 0.18), (0.75, 1.25, 0.22),
+            (1.2, 1.35, 0.16), (0.4, 1.1, 0.14)
+        ]
+        for c in craters {
+            let rect = CGRect(x: c.x * radius - c.r * radius, y: c.y * radius - c.r * radius, width: c.r * radius * 2, height: c.r * radius * 2)
+            cg.setFillColor(shadow.darkened(by: 0.5).cgColor)
+            cg.fillEllipse(in: rect)
+            cg.setStrokeColor(highlight.withAlphaComponent(0.7).cgColor)
+            cg.setLineWidth(max(1.0, radius * 0.04))
+            cg.strokeEllipse(in: rect)
+        }
+    }
+
+    private static func drawPlanet(cg: CGContext, radius: CGFloat, centre: CGPoint, baseColor: UIColor, glowColor: UIColor) {
+        // Deep vibrant ocean base
+        let oceanDeep = UIColor(red: 0.05, green: 0.22, blue: 0.55, alpha: 1.0)
+        let oceanBright = UIColor(red: 0.10, green: 0.58, blue: 0.82, alpha: 1.0)
+        let oceanShadow = UIColor(red: 0.02, green: 0.08, blue: 0.25, alpha: 1.0)
+
+        let lightPos = CGPoint(x: radius * 0.65, y: radius * 0.55)
+        let oColors = [oceanBright.cgColor, oceanDeep.cgColor, oceanShadow.cgColor] as CFArray
+        if let grad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: oColors, locations: [0.0, 0.55, 1.0]) {
+            cg.drawRadialGradient(grad, startCenter: lightPos, startRadius: 0, endCenter: centre, endRadius: radius, options: [])
+        }
+
+        // Continents / landmasses (Emerald green & turquoise)
+        let landColor = UIColor(red: 0.15, green: 0.72, blue: 0.45, alpha: 0.92)
+        let coastColor = UIColor(red: 0.28, green: 0.88, blue: 0.68, alpha: 0.65)
+
+        cg.setFillColor(landColor.cgColor)
+        let continents: [(x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat, rot: CGFloat)] = [
+            (0.55, 0.65, 0.75, 0.55, 0.3),
+            (1.15, 1.05, 0.85, 0.65, -0.4),
+            (0.85, 1.35, 0.65, 0.45, 0.2),
+            (1.35, 0.55, 0.55, 0.40, 0.5)
+        ]
+
+        for c in continents {
+            cg.saveGState()
+            cg.translateBy(x: c.x * radius, y: c.y * radius)
+            cg.rotate(by: c.rot)
+            let rect = CGRect(x: -c.w * radius / 2, y: -c.h * radius / 2, width: c.w * radius, height: c.h * radius)
+            cg.fillEllipse(in: rect)
+            cg.setStrokeColor(coastColor.cgColor)
+            cg.setLineWidth(max(1.5, radius * 0.06))
+            cg.strokeEllipse(in: rect)
+            cg.restoreGState()
+        }
+
+        // Swirling atmospheric white clouds
+        cg.setFillColor(UIColor.white.withAlphaComponent(0.38).cgColor)
+        cg.fillEllipse(in: CGRect(x: radius * 0.3, y: radius * 0.35, width: radius * 1.3, height: radius * 0.28))
+        cg.fillEllipse(in: CGRect(x: radius * 0.4, y: radius * 0.85, width: radius * 1.2, height: radius * 0.24))
+        cg.fillEllipse(in: CGRect(x: radius * 0.2, y: radius * 1.35, width: radius * 1.4, height: radius * 0.32))
+
+        // Vibrant cyan atmospheric limb glow
+        let limbColors = [UIColor.clear.cgColor, UIColor.cyan.withAlphaComponent(0.45).cgColor] as CFArray
+        if let limbGrad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: limbColors, locations: [0.75, 1.0]) {
+            cg.drawRadialGradient(limbGrad, startCenter: centre, startRadius: radius * 0.75, endCenter: centre, endRadius: radius, options: [])
+        }
+    }
+
+    private static func drawGasGiant(cg: CGContext, radius: CGFloat, centre: CGPoint, baseColor: UIColor, glowColor: UIColor) {
+        // Multi-layered Jovian atmospheric bands (amber, cream, golden ochre)
+        let bandColors: [UIColor] = [
+            UIColor(red: 0.95, green: 0.78, blue: 0.35, alpha: 1.0),
+            UIColor(red: 0.85, green: 0.55, blue: 0.22, alpha: 1.0),
+            UIColor(red: 0.98, green: 0.90, blue: 0.70, alpha: 1.0),
+            UIColor(red: 0.78, green: 0.42, blue: 0.18, alpha: 1.0),
+            UIColor(red: 0.92, green: 0.70, blue: 0.30, alpha: 1.0),
+            UIColor(red: 0.65, green: 0.30, blue: 0.12, alpha: 1.0)
+        ]
+
+        let numBands = 12
+        let bandHeight = (radius * 2) / CGFloat(numBands)
+
+        for i in 0..<numBands {
+            let y = CGFloat(i) * bandHeight
+            let col = bandColors[i % bandColors.count]
+            cg.setFillColor(col.cgColor)
+            cg.fill(CGRect(x: 0, y: y, width: radius * 2, height: bandHeight + 1))
+        }
+
+        // Great Red / Amber Storm Oval
+        let stormRect = CGRect(x: radius * 1.05, y: radius * 1.15, width: radius * 0.55, height: radius * 0.35)
+        cg.setFillColor(UIColor(red: 0.85, green: 0.28, blue: 0.12, alpha: 0.92).cgColor)
+        cg.fillEllipse(in: stormRect)
+        cg.setStrokeColor(UIColor(red: 0.98, green: 0.85, blue: 0.40, alpha: 0.75).cgColor)
+        cg.setLineWidth(max(1.0, radius * 0.04))
+        cg.strokeEllipse(in: stormRect)
+    }
+
+    private static func drawStar(cg: CGContext, radius: CGFloat, centre: CGPoint, baseColor: UIColor, glowColor: UIColor) {
+        let whiteHot = UIColor(white: 1.0, alpha: 1.0)
+        let solarYellow = UIColor(red: 1.0, green: 0.88, blue: 0.20, alpha: 1.0)
+        let solarOrange = UIColor(red: 1.0, green: 0.45, blue: 0.05, alpha: 1.0)
+        let solarRed = UIColor(red: 0.90, green: 0.15, blue: 0.02, alpha: 1.0)
+
+        let colors = [whiteHot.cgColor, solarYellow.cgColor, solarOrange.cgColor, solarRed.cgColor] as CFArray
+        if let grad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0.0, 0.35, 0.75, 1.0]) {
+            cg.drawRadialGradient(grad, startCenter: centre, startRadius: 0, endCenter: centre, endRadius: radius, options: [])
+        }
+
+        // Fiery solar plasma granulation / sunspots
+        cg.setFillColor(solarRed.withAlphaComponent(0.45).cgColor)
+        for _ in 0..<12 {
+            let rx = CGFloat.random(in: 0.3...1.7) * radius
+            let ry = CGFloat.random(in: 0.3...1.7) * radius
+            let rr = CGFloat.random(in: 0.12...0.25) * radius
+            cg.fillEllipse(in: CGRect(x: rx - rr, y: ry - rr, width: rr * 2, height: rr * 2))
+        }
+    }
+
+    private static func drawBlackHole(cg: CGContext, radius: CGFloat, centre: CGPoint, baseColor: UIColor, glowColor: UIColor) {
+        // Deep obsidian singularity
+        cg.setFillColor(UIColor.black.cgColor)
+        cg.fillEllipse(in: CGRect(x: 0, y: 0, width: radius * 2, height: radius * 2))
+
+        // Relativistic photon ring and accretion vortex
+        let ringColors = [
+            UIColor.clear.cgColor,
+            UIColor.purple.withAlphaComponent(0.7).cgColor,
+            UIColor.cyan.withAlphaComponent(0.95).cgColor,
+            UIColor.white.cgColor
+        ] as CFArray
+        if let ringGrad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: ringColors, locations: [0.72, 0.85, 0.94, 1.0]) {
+            cg.drawRadialGradient(ringGrad, startCenter: centre, startRadius: radius * 0.7, endCenter: centre, endRadius: radius, options: [])
+        }
+    }
+
+    private static func drawAntimatter(cg: CGContext, radius: CGFloat, centre: CGPoint, baseColor: UIColor, glowColor: UIColor) {
+        cg.setFillColor(UIColor(white: 0.08, alpha: 1.0).cgColor)
+        cg.fillEllipse(in: CGRect(x: 0, y: 0, width: radius * 2, height: radius * 2))
+
+        // Crackling quantum energy fissures
+        cg.setStrokeColor(UIColor.red.withAlphaComponent(0.85).cgColor)
+        cg.setLineWidth(max(1.5, radius * 0.1))
+        cg.move(to: CGPoint(x: radius * 0.4, y: radius * 0.3))
+        cg.addLine(to: CGPoint(x: radius * 0.9, y: radius * 0.8))
+        cg.addLine(to: CGPoint(x: radius * 1.5, y: radius * 0.6))
+        cg.addLine(to: CGPoint(x: radius * 1.3, y: radius * 1.4))
+        cg.strokePath()
+
+        let auraColors = [UIColor.clear.cgColor, UIColor.red.withAlphaComponent(0.65).cgColor] as CFArray
+        if let grad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: auraColors, locations: [0.65, 1.0]) {
+            cg.drawRadialGradient(grad, startCenter: centre, startRadius: radius * 0.65, endCenter: centre, endRadius: radius, options: [])
+        }
+    }
+
+    private static func draw3DShadingOverlay(cg: CGContext, radius: CGFloat, centre: CGPoint, tier: CelestialTier, glowColor: UIColor) {
+        if tier == .star || tier == .blackHole { return }
+
+        // Spherical terminator / ambient occlusion shadow
+        let shadowColors = [UIColor.clear.cgColor, UIColor.black.withAlphaComponent(0.65).cgColor] as CFArray
+        if let sGrad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: shadowColors, locations: [0.4, 1.0]) {
+            cg.drawRadialGradient(sGrad, startCenter: CGPoint(x: radius * 0.65, y: radius * 0.55), startRadius: radius * 0.2, endCenter: centre, endRadius: radius, options: [])
+        }
+
+        // Specular highlight at 10 o'clock
+        let specCentre = CGPoint(x: radius * 0.65, y: radius * 0.55)
+        let specColors = [UIColor.white.withAlphaComponent(0.48).cgColor, UIColor.clear.cgColor] as CFArray
+        if let specGrad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: specColors, locations: [0.0, 1.0]) {
+            cg.drawRadialGradient(specGrad, startCenter: specCentre, startRadius: 0, endCenter: specCentre, endRadius: radius * 0.45, options: [])
+        }
+
+        // Atmospheric rim light
+        let rimColors = [UIColor.clear.cgColor, glowColor.withAlphaComponent(0.55).cgColor] as CFArray
+        if let rimGrad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: rimColors, locations: [0.85, 1.0]) {
+            cg.drawRadialGradient(rimGrad, startCenter: centre, startRadius: radius * 0.85, endCenter: centre, endRadius: radius, options: [])
+        }
+    }
+}
+
+// MARK: - Color utilities
+
+extension UIColor {
+    func lightened(by amount: CGFloat) -> UIColor {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        getRed(&r, green: &g, blue: &b, alpha: &a)
+        return UIColor(red: min(1.0, r + amount), green: min(1.0, g + amount), blue: min(1.0, b + amount), alpha: a)
+    }
+
+    func darkened(by amount: CGFloat) -> UIColor {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        getRed(&r, green: &g, blue: &b, alpha: &a)
+        return UIColor(red: max(0.0, r - amount), green: max(0.0, g - amount), blue: max(0.0, b - amount), alpha: a)
     }
 }
 

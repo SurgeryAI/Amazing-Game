@@ -18,7 +18,7 @@ let package = Package(
             targets: ["AppModule"],
             bundleIdentifier: "com.bookmarc.gravitycascade",
             teamIdentifier: "C3U5S48E88",
-            displayVersion: "1.10",
+            displayVersion: "1.30",
             bundleVersion: "1",
             appIcon: .asset("AppIcon"),
             accentColor: .presetColor(.indigo),

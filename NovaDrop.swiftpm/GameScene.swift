@@ -450,44 +450,40 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     func createBodyNode(tier: CelestialTier, polarity: Polarity) -> SKShapeNode {
         let node = SKShapeNode(circleOfRadius: tier.radius)
-        node.fillColor = tier.uiColor
-        node.lineWidth = 2
+        node.fillColor = .clear
+        node.lineWidth = polarity == .neutral ? 1.5 : 3.0
         node.glowWidth = tier.standardGlowWidth
-        node.strokeColor = polarity == .neutral ? tier.glowColor : polarity.uiColor
+        node.strokeColor = polarity == .neutral ? tier.glowColor.withAlphaComponent(0.60) : polarity.uiColor
 
-        if tier == .blackHole {
-            node.fillColor = .black
-        } else if tier == .antimatter {
-            node.fillColor = UIColor(white: 0.1, alpha: 1.0)
+        let theme = ProgressManager.shared.activeTheme
+        if let texture = FX.celestialTexture(tier: tier, radius: tier.radius, theme: theme) {
+            let sprite = SKSpriteNode(texture: texture)
+            sprite.size = CGSize(width: tier.radius * 2, height: tier.radius * 2)
+            sprite.zPosition = 0
+            sprite.name = "celestialTexture"
+            node.addChild(sprite)
+        }
+
+        if tier == .antimatter {
             node.run(.repeatForever(.sequence([
-                .scale(to: 0.82, duration: 0.5),
-                .scale(to: 1.18, duration: 0.5)
+                .scale(to: 0.84, duration: 0.5),
+                .scale(to: 1.16, duration: 0.5)
             ])))
         }
 
-        // Rim light and specular in one cached sprite rather than two live
-        // shape nodes — see FX.orbShading.
-        if tier != .blackHole, let shading = FX.orbShading(radius: tier.radius) {
-            let shade = SKSpriteNode(texture: shading)
-            shade.size = CGSize(width: tier.radius * 2, height: tier.radius * 2)
-            shade.zPosition = 1
-            shade.name = "shading"
-            node.addChild(shade)
-        }
-
         if tier == .gasGiant {
-            let ring = SKShapeNode(ellipseOf: CGSize(width: tier.radius * 2.6,
-                                                     height: tier.radius * 0.52))
+            let ring = SKShapeNode(ellipseOf: CGSize(width: tier.radius * 2.7,
+                                                     height: tier.radius * 0.55))
             ring.fillColor = .clear
-            ring.strokeColor = tier.glowColor.withAlphaComponent(0.60)
+            ring.strokeColor = tier.glowColor.withAlphaComponent(0.75)
             ring.lineWidth = 4
-            ring.glowWidth = 4
+            ring.glowWidth = 5
             ring.zPosition = -1
             node.addChild(ring)
         }
 
         if tier == .star {
-            let minGlow: CGFloat = 14, maxGlow: CGFloat = 32, dur: Double = 0.8
+            let minGlow: CGFloat = 16, maxGlow: CGFloat = 36, dur: Double = 0.8
             let range = maxGlow - minGlow
             let up = SKAction.customAction(withDuration: dur) { n, elapsed in
                 (n as? SKShapeNode)?.glowWidth = minGlow + (elapsed / dur) * range
@@ -499,14 +495,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
 
         if tier == .blackHole {
-            let disk = SKShapeNode(ellipseOf: CGSize(width: tier.radius * 2.8,
-                                                     height: tier.radius * 0.55))
+            let disk = SKShapeNode(ellipseOf: CGSize(width: tier.radius * 2.9,
+                                                     height: tier.radius * 0.58))
             disk.fillColor = .clear
-            disk.strokeColor = tier.glowColor.withAlphaComponent(0.90)
+            disk.strokeColor = tier.glowColor.withAlphaComponent(0.95)
             disk.lineWidth = 6
-            disk.glowWidth = 10
+            disk.glowWidth = 12
             disk.zPosition = -1
-            disk.run(.repeatForever(.rotate(byAngle: .pi * 2, duration: 5.0)))
+            disk.run(.repeatForever(.rotate(byAngle: .pi * 2, duration: 4.5)))
             node.addChild(disk)
         }
 
@@ -514,8 +510,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             let symbol = SKLabelNode(text: polarity.symbol)
             symbol.name = "polaritySymbol"
             symbol.fontName = "AvenirNext-Bold"
-            symbol.fontSize = max(16, tier.radius * 1.2)
-            symbol.fontColor = UIColor(white: 1.0, alpha: 0.9)
+            symbol.fontSize = max(16, tier.radius * 1.1)
+            symbol.fontColor = UIColor(white: 1.0, alpha: 0.95)
             symbol.horizontalAlignmentMode = .center
             symbol.verticalAlignmentMode = .center
             symbol.zPosition = 5
