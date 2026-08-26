@@ -15,14 +15,7 @@ enum AdUnits {
     static let banner       = "ca-app-pub-6432429930581606/6568763063"
     static let interstitial = "ca-app-pub-6432429930581606/4971979475"
 
-    // ---------------------------------------------------------------------
-    // ACTION REQUIRED BEFORE RELEASE
-    // Create a *Rewarded* ad unit in the AdMob console for this app and paste
-    // its ID here. Until then this ships Google's test unit, which serves test
-    // creatives and earns nothing.
-    // ---------------------------------------------------------------------
-    #warning("Set a real AdMob Rewarded ad unit ID in AdUnits.rewarded before shipping.")
-    static let rewarded     = "ca-app-pub-3940256099942544/1712485313"
+    static let rewarded     = "ca-app-pub-6432429930581606/3782519218"
     #endif
 }
 
