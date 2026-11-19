@@ -112,6 +112,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         guard hasAppeared else { return }   // didMove will build with these values
         rebuildBoundary()
         layoutGuides()
+        repositionActiveBody()
         liftBodiesOffFloor()
     }
 
@@ -177,14 +178,18 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         rebuildBackground()
         rebuildBoundary()
         layoutGuides()
-        if let active = activeBody {
-            active.position.y = topY
-            updateActiveBodyPosition(x: active.position.x)
-        }
+        repositionActiveBody()
+    }
+
+    private func repositionActiveBody() {
+        guard let active = activeBody else { return }
+        active.position.y = topY
+        updateActiveBodyPosition(x: active.position.x)
     }
 
     private func rebuildBackground() {
         bgLayer.removeAllActions()
+        bgLayer.position = .zero
         bgLayer.removeAllChildren()
         guard size.width > 0, size.height > 0 else { return }
         buildCosmicBackground(in: bgLayer, size: size)
@@ -1034,7 +1039,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         guard !isGameOver else { return }
 
         if lastUpdateTime == 0 { lastUpdateTime = currentTime }
-        let dt = min(0.1, currentTime - lastUpdateTime)   // clamp after a stall
+        let dt = max(0, min(0.1, currentTime - lastUpdateTime))   // clamp after a stall
         lastUpdateTime = currentTime
         playTime += dt
         let now = playTime
@@ -1304,7 +1309,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         gameOverTimer = 0
         lastUpdateTime = 0
         comboCount = 0
-        lastMergeTime = 0
+        lastMergeTime = -10
 
         let purgePoint = CGPoint(x: size.width / 2, y: topY)
         let candidates = playLayer.children

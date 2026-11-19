@@ -230,7 +230,11 @@ final class ProgressManager: ObservableObject {
 
     /// True when the player broke a streak worth restoring, today.
     var canRecoverStreak: Bool {
-        recoverableStreak > 1 && recoverableOnKey == DailyChallenge.dateKey(for: Date())
+        canRecoverStreak(on: Date())
+    }
+
+    func canRecoverStreak(on now: Date) -> Bool {
+        recoverableStreak > 1 && recoverableOnKey == DailyChallenge.dateKey(for: now)
     }
 
     var recoverableStreakValue: Int { recoverableStreak }
@@ -238,19 +242,25 @@ final class ProgressManager: ObservableObject {
     /// Restores a streak broken today. Purely a convenience — it grants no
     /// score, no shards, and no gameplay advantage.
     func recoverStreak(now: Date = Date()) {
-        guard canRecoverStreak else { return }
-        streak = max(streak, recoverableStreak)
+        guard canRecoverStreak(on: now) else { return }
+        let today = DailyChallenge.dateKey(for: now)
+        if lastDailyKey == today {
+            // Player already completed today's Daily Challenge before restoring.
+            streak = max(streak, recoverableStreak + 1)
+        } else {
+            streak = max(streak, recoverableStreak)
+            // Anchor lastDailyKey to yesterday so refreshForToday() does not
+            // immediately see a >1-day gap and wipe the restored streak, and
+            // completing today's Daily Challenge increments it by 1.
+            var cal = Calendar(identifier: .gregorian)
+            cal.timeZone = TimeZone.current
+            if let yesterday = cal.date(byAdding: .day, value: -1, to: now) {
+                lastDailyKey = DailyChallenge.dateKey(for: yesterday)
+            }
+        }
         bestStreak = max(bestStreak, streak)
         recoverableStreak = 0
         recoverableOnKey = ""
-        // Anchor lastDailyKey to yesterday so refreshForToday() does not
-        // immediately see a >1-day gap and wipe the restored streak, and
-        // completing today's Daily Challenge increments it by 1.
-        var cal = Calendar(identifier: .gregorian)
-        cal.timeZone = TimeZone.current
-        if let yesterday = cal.date(byAdding: .day, value: -1, to: now) {
-            lastDailyKey = DailyChallenge.dateKey(for: yesterday)
-        }
         saveStreak()
     }
 

@@ -46,17 +46,19 @@ final class InterstitialAdManager: NSObject, GADFullScreenContentDelegate, Obser
 
         isLoading = true
         GADInterstitialAd.load(withAdUnitID: AdUnits.interstitial, request: GADRequest()) { [weak self] ad, error in
-            guard let self = self else { return }
-            self.isLoading = false
-            if let error = error {
-                self.lastLoadFailure = Date()
-                self.interstitial = nil
-                print("Failed to load interstitial ad: \(error.localizedDescription)")
-                return
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.isLoading = false
+                if let error = error {
+                    self.lastLoadFailure = Date()
+                    self.interstitial = nil
+                    print("Failed to load interstitial ad: \(error.localizedDescription)")
+                    return
+                }
+                self.lastLoadFailure = nil
+                self.interstitial = ad
+                self.interstitial?.fullScreenContentDelegate = self
             }
-            self.lastLoadFailure = nil
-            self.interstitial = ad
-            self.interstitial?.fullScreenContentDelegate = self
         }
     }
 
@@ -85,7 +87,19 @@ final class InterstitialAdManager: NSObject, GADFullScreenContentDelegate, Obser
 
         guard Double.random(in: 0..<1) < showProbability else { completion?(); return }
 
+        guard onDismiss == nil else { completion?(); return }
+
         guard let ad = interstitial, let root = AdPresenter.rootViewController else {
+            loadAd()
+            completion?()
+            return
+        }
+
+        do {
+            try ad.canPresent(fromRootViewController: root)
+        } catch {
+            print("Interstitial cannot present: \(error.localizedDescription)")
+            interstitial = nil
             loadAd()
             completion?()
             return
@@ -94,7 +108,6 @@ final class InterstitialAdManager: NSObject, GADFullScreenContentDelegate, Obser
         // Consume before presenting: an ad object is single-use, and the old
         // code could hand the same object to `present` twice.
         interstitial = nil
-        lastFullScreenAdAt = Date()
         onDismiss = completion
         ad.present(fromRootViewController: root)
     }
@@ -109,6 +122,10 @@ final class InterstitialAdManager: NSObject, GADFullScreenContentDelegate, Obser
     }
 
     // MARK: - GADFullScreenContentDelegate
+
+    func adWillPresentFullScreenContent(_ ad: GADFullScreenPresentingAd) {
+        lastFullScreenAdAt = Date()
+    }
 
     func ad(_ ad: GADFullScreenPresentingAd,
             didFailToPresentFullScreenContentWithError error: Error) {
