@@ -178,9 +178,24 @@ struct ContentView: View {
     private var hud: some View {
         HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(mode.isDaily ? "DAILY" : "SCORE")
-                    .font(.caption.weight(.heavy))
-                    .foregroundColor(.gray)
+                HStack(spacing: 5) {
+                    Text(mode.isDaily ? "DAILY" : "SCORE")
+                        .font(.caption.weight(.heavy))
+                        .foregroundColor(.gray)
+                    if case .daily(let key) = mode {
+                        let mod = DailyChallenge.modifier(forDateKey: key)
+                        HStack(spacing: 3) {
+                            Image(systemName: mod.symbolName)
+                            Text(mod.title)
+                        }
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.cyan)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.cyan.opacity(0.16)))
+                        .lineLimit(1)
+                    }
+                }
                 Text("\(score)")
                     .font(.system(size: 30, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
@@ -326,7 +341,7 @@ struct ContentView: View {
             withAnimation(.easeOut(duration: 0.12)) { comboLevel = combo }
             comboToken += 1
             let token = comboToken
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.7) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Balance.comboWindow) {
                 if token == comboToken {
                     withAnimation(.easeOut(duration: 0.4)) { comboLevel = 0 }
                 }
@@ -458,22 +473,37 @@ struct NextOrbView: View {
     let tier: CelestialTier
     let polarity: Polarity
     var diameter: CGFloat = 40
+    @ObservedObject private var progress = ProgressManager.shared
 
     var body: some View {
+        let theme = progress.activeTheme
+        let glowColor = Color(uiColor: theme.glowUIColor(for: tier))
         ZStack {
-            Circle()
-                .fill(tier.gradient)
+            if tier == .gasGiant || tier == .blackHole {
+                Ellipse()
+                    .stroke(
+                        (tier == .blackHole ? glowColor : glowColor.opacity(0.75)),
+                        lineWidth: tier == .blackHole ? 2.5 : 2
+                    )
+                    .frame(width: diameter * 1.42, height: diameter * 0.34)
+                    .rotationEffect(.degrees(-14))
+            }
+
+            Image(uiImage: FX.celestialImage(tier: tier, radius: diameter / 2, theme: theme))
+                .resizable()
+                .frame(width: diameter, height: diameter)
+                .clipShape(Circle())
                 .overlay(
                     Circle().stroke(polarity == .neutral
-                                    ? Color(uiColor: tier.glowColor).opacity(0.6)
+                                    ? glowColor.opacity(0.65)
                                     : polarity.color.opacity(0.95),
                                     lineWidth: 2)
                 )
-                .frame(width: diameter, height: diameter)
                 .shadow(color: polarity == .neutral
-                        ? Color(uiColor: tier.glowColor).opacity(0.85)
+                        ? glowColor.opacity(0.85)
                         : polarity.color.opacity(0.85),
                         radius: 9)
+
             if polarity != .neutral {
                 Text(polarity.symbol)
                     .font(.system(size: diameter * 0.6, weight: .black, design: .rounded))

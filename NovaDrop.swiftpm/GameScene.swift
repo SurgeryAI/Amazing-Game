@@ -60,9 +60,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private let playLayer = SKNode()
     private let bgLayer = SKNode()
     private let dropGuide = SKShapeNode()
-    private let landingMarker = SKShapeNode(ellipseOf: CGSize(width: 34, height: 10))
+    private let landingGhost = SKShapeNode()
+    private let antimatterPreviewRing = SKShapeNode()
+    private let attractFieldNode = SKShapeNode()
+    private let repelFieldNode = SKShapeNode()
     private var dangerLine = SKShapeNode()
     private var boundary = SKNode()
+
+    private enum LandingOutcome {
+        case neutral, willMerge, blockedByCharge, antimatter
+    }
 
     private var comboCount = 0
     private var lastMergeTime: TimeInterval = -10
@@ -73,6 +80,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var playTime: TimeInterval = 0
     private var lastWarningBeep: TimeInterval = -10
     private var lastLandSound: TimeInterval = 0
+    private var lastRepelFeedback: TimeInterval = -10
     private var reportedDanger: Double = -1
 
     /// False until `didMove(to:)` has built the world. Guards against a
@@ -212,11 +220,37 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         dropGuide.zPosition = 4
         addChild(dropGuide)
 
-        landingMarker.strokeColor = UIColor.white.withAlphaComponent(0.30)
-        landingMarker.fillColor = .clear
-        landingMarker.lineWidth = 2
-        landingMarker.zPosition = 4
-        addChild(landingMarker)
+        landingGhost.strokeColor = UIColor.white.withAlphaComponent(0.35)
+        landingGhost.fillColor = UIColor.white.withAlphaComponent(0.08)
+        landingGhost.lineWidth = 2
+        landingGhost.zPosition = 4
+        landingGhost.alpha = 0
+        addChild(landingGhost)
+
+        let ringRadius = Balance.antimatterReach
+        let ringRect = CGRect(x: -ringRadius, y: -ringRadius, width: ringRadius * 2, height: ringRadius * 2)
+        antimatterPreviewRing.path = CGPath(ellipseIn: ringRect, transform: nil)
+            .copy(dashingWithPhase: 0, lengths: [8, 6])
+        antimatterPreviewRing.strokeColor = UIColor.red.withAlphaComponent(0.60)
+        antimatterPreviewRing.fillColor = UIColor.red.withAlphaComponent(0.07)
+        antimatterPreviewRing.lineWidth = 1.5
+        antimatterPreviewRing.zPosition = 3
+        antimatterPreviewRing.isHidden = true
+        addChild(antimatterPreviewRing)
+
+        attractFieldNode.strokeColor = UIColor.cyan.withAlphaComponent(0.32)
+        attractFieldNode.lineWidth = 1.5
+        attractFieldNode.lineCap = .round
+        attractFieldNode.blendMode = .add
+        attractFieldNode.zPosition = 9
+        addChild(attractFieldNode)
+
+        repelFieldNode.strokeColor = UIColor.orange.withAlphaComponent(0.38)
+        repelFieldNode.lineWidth = 1.5
+        repelFieldNode.lineCap = .round
+        repelFieldNode.blendMode = .add
+        repelFieldNode.zPosition = 9
+        addChild(repelFieldNode)
 
         layoutGuides()
     }
@@ -253,8 +287,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         guidePath.addLine(to: CGPoint(x: 0, y: floorY + 4))
         dropGuide.path = guidePath.copy(dashingWithPhase: 0, lengths: [5, 9])
         dropGuide.position = CGPoint(x: size.width / 2, y: 0)
-
-        landingMarker.position = CGPoint(x: size.width / 2, y: floorY + 8)
+        refreshLandingPreview()
     }
 
     private func startMotionUpdates() {
@@ -399,21 +432,28 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         node.position = CGPoint(x: size.width / 2, y: topY)
         node.physicsBody = nil
         node.alpha = 0.55
+        node.setScale(0.35)
         playLayer.addChild(node)
         activeBody = node
 
-        dropGuide.position.x = size.width / 2
-        landingMarker.position.x = size.width / 2
         dropGuide.removeAllActions()
-        landingMarker.removeAllActions()
+        landingGhost.removeAllActions()
         dropGuide.run(.fadeAlpha(to: 1.0, duration: 0.15))
-        landingMarker.run(.fadeAlpha(to: 1.0, duration: 0.15))
+        landingGhost.run(.fadeAlpha(to: 1.0, duration: 0.15))
 
         // A finger held through the respawn gap keeps its aim instead of the
         // new orb snapping back to the centre.
         if let held = activeTouch {
             updateActiveBodyPosition(x: held.location(in: self).x)
+        } else {
+            refreshLandingPreview()
         }
+
+        let popUp = SKAction.scale(to: 1.08, duration: 0.10)
+        popUp.timingMode = .easeOut
+        let popSettle = SKAction.scale(to: 1.0, duration: 0.08)
+        popSettle.timingMode = .easeInEaseOut
+        let popIn = SKAction.sequence([popUp, popSettle])
 
         if spec.unstable {
             node.userData?["unstable"] = true
@@ -424,7 +464,35 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 .scale(to: 0.93, duration: 0.2),
                 .scale(to: 1.07, duration: 0.2)
             ])
-            node.run(.repeatForever(pulse), withKey: "unstableWarning")
+            node.run(.sequence([popIn, .repeatForever(pulse)]), withKey: "unstableWarning")
+
+            // Radial countdown arc so the unstable auto-drop is always legible.
+            let fuseRadius = spec.tier.radius + 7
+            let totalFuse = Balance.unstableFuse + 3.0
+            let fuseRing = SKShapeNode()
+            fuseRing.name = "fuseRing"
+            fuseRing.fillColor = .clear
+            fuseRing.strokeColor = .orange
+            fuseRing.lineWidth = 3
+            fuseRing.lineCap = .round
+            fuseRing.glowWidth = 2
+            fuseRing.zPosition = 6
+            node.addChild(fuseRing)
+
+            let fuseAnim = SKAction.customAction(withDuration: totalFuse) { ringNode, elapsed in
+                guard let shape = ringNode as? SKShapeNode else { return }
+                let remaining = max(0.0, 1.0 - Double(elapsed) / totalFuse)
+                let startAngle = CGFloat.pi / 2
+                let endAngle = startAngle - CGFloat(remaining) * (.pi * 2)
+                let arc = UIBezierPath(arcCenter: .zero,
+                                       radius: fuseRadius,
+                                       startAngle: startAngle,
+                                       endAngle: endAngle,
+                                       clockwise: false)
+                shape.path = arc.cgPath
+                shape.strokeColor = Double(elapsed) >= Balance.unstableFuse ? .red : .orange
+            }
+            fuseRing.run(fuseAnim, withKey: "fuseDrain")
 
             let shakeStep = SKAction.sequence([
                 .moveBy(x: -6, y: 0, duration: 0.05),
@@ -441,7 +509,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             breatheIn.timingMode = .easeInEaseOut
             let breatheOut = SKAction.scale(to: 0.97, duration: 0.7)
             breatheOut.timingMode = .easeInEaseOut
-            node.run(.repeatForever(.sequence([breatheIn, breatheOut])), withKey: "idlePulse")
+            node.run(.sequence([popIn, .repeatForever(.sequence([breatheIn, breatheOut]))]), withKey: "idlePulse")
         }
     }
 
@@ -599,8 +667,103 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let r = tier.radius
         let clampedX = max(r, min(size.width - r, x))
         active.position.x = clampedX
-        dropGuide.position.x = clampedX
-        landingMarker.position.x = clampedX
+        refreshLandingPreview()
+    }
+
+    private func predictLanding(x: CGFloat, radius: CGFloat,
+                                tier: CelestialTier, polarity: Polarity) -> (y: CGFloat, outcome: LandingOutcome) {
+        var bestY = floorY + radius
+        var hitNode: SKShapeNode?
+
+        for child in playLayer.children {
+            guard let node = child as? SKShapeNode, node !== activeBody,
+                  let data = node.userData, node.physicsBody != nil else { continue }
+            if data["isBounce"] as? Bool == true { continue }
+            if data["dying"] as? Bool == true { continue }
+            guard let otherRaw = data["tier"] as? Int,
+                  let otherTier = CelestialTier(rawValue: otherRaw) else { continue }
+
+            let dx = abs(node.position.x - x)
+            let sumR = radius + otherTier.radius
+            guard dx < sumR else { continue }
+
+            let hitY = node.position.y + sqrt(max(0, sumR * sumR - dx * dx))
+            if hitY > bestY {
+                bestY = hitY
+                hitNode = node
+            }
+        }
+
+        let clampedY = min(bestY, topY)
+        if tier == .antimatter {
+            return (clampedY, .antimatter)
+        }
+        if let hit = hitNode,
+           let otherRaw = hit.userData?["tier"] as? Int,
+           otherRaw == tier.rawValue {
+            let polA = polarity.rawValue
+            let polB = hit.userData?["polarity"] as? Int ?? 0
+            if polA != 0 && polA == polB {
+                return (clampedY, .blockedByCharge)
+            }
+            return (clampedY, .willMerge)
+        }
+        return (clampedY, .neutral)
+    }
+
+    private func refreshLandingPreview() {
+        guard let active = activeBody, size.width > 0, size.height > 0 else { return }
+        let tier = CelestialTier(rawValue: active.userData?["tier"] as? Int ?? 0) ?? .dust
+        let polarity = Polarity(rawValue: active.userData?["polarity"] as? Int ?? 0) ?? .neutral
+        let x = active.position.x
+        let r = tier.radius
+
+        let (predY, outcome) = predictLanding(x: x, radius: r, tier: tier, polarity: polarity)
+
+        let ghostRect = CGRect(x: -r, y: -r, width: r * 2, height: r * 2)
+        landingGhost.path = CGPath(ellipseIn: ghostRect, transform: nil)
+        landingGhost.position = CGPoint(x: x, y: predY)
+
+        switch outcome {
+        case .neutral:
+            let tint = polarity == .neutral ? tier.glowColor : polarity.uiColor
+            landingGhost.strokeColor = tint.withAlphaComponent(0.42)
+            landingGhost.fillColor = tint.withAlphaComponent(0.08)
+            landingGhost.glowWidth = 1.5
+            dropGuide.strokeColor = UIColor.white.withAlphaComponent(0.22)
+            antimatterPreviewRing.isHidden = true
+        case .willMerge:
+            landingGhost.strokeColor = UIColor.systemYellow.withAlphaComponent(0.92)
+            landingGhost.fillColor = UIColor.systemYellow.withAlphaComponent(0.16)
+            landingGhost.glowWidth = 4
+            dropGuide.strokeColor = UIColor.systemYellow.withAlphaComponent(0.48)
+            antimatterPreviewRing.isHidden = true
+        case .blockedByCharge:
+            landingGhost.strokeColor = UIColor.orange.withAlphaComponent(0.88)
+            landingGhost.fillColor = UIColor.orange.withAlphaComponent(0.14)
+            landingGhost.glowWidth = 3
+            dropGuide.strokeColor = UIColor.orange.withAlphaComponent(0.40)
+            antimatterPreviewRing.isHidden = true
+        case .antimatter:
+            landingGhost.strokeColor = UIColor.red.withAlphaComponent(0.90)
+            landingGhost.fillColor = UIColor.red.withAlphaComponent(0.16)
+            landingGhost.glowWidth = 4
+            dropGuide.strokeColor = UIColor.red.withAlphaComponent(0.42)
+            antimatterPreviewRing.position = CGPoint(x: x, y: predY)
+            antimatterPreviewRing.isHidden = false
+        }
+
+        let lineTop = topY - r
+        let lineBottom = predY + r
+        if lineTop > lineBottom + 4 {
+            let guidePath = CGMutablePath()
+            guidePath.move(to: CGPoint(x: 0, y: lineTop))
+            guidePath.addLine(to: CGPoint(x: 0, y: lineBottom))
+            dropGuide.path = guidePath.copy(dashingWithPhase: 0, lengths: [5, 9])
+            dropGuide.position = CGPoint(x: x, y: 0)
+        } else {
+            dropGuide.path = nil
+        }
     }
 
     private func dropActiveBody() {
@@ -611,13 +774,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         active.removeAction(forKey: "unstableTimer")
         active.removeAction(forKey: "unstableWarning")
         active.removeAction(forKey: "idlePulse")
+        active.childNode(withName: "fuseRing")?.removeFromParent()
         active.setScale(1.0)
         active.alpha = 1.0
 
         dropGuide.removeAllActions()
-        landingMarker.removeAllActions()
+        landingGhost.removeAllActions()
         dropGuide.run(.fadeAlpha(to: 0.0, duration: 0.15))
-        landingMarker.run(.fadeAlpha(to: 0.0, duration: 0.15))
+        landingGhost.run(.fadeAlpha(to: 0.0, duration: 0.15))
+        antimatterPreviewRing.isHidden = true
 
         let tier = CelestialTier(rawValue: active.userData?["tier"] as? Int ?? 0) ?? .dust
         let polarityRaw = active.userData?["polarity"] as? Int ?? 0
@@ -637,6 +802,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         setupBodyPhysics(node: active, tier: tier)
         AudioManager.shared.play(.drop, volume: 0.7)
+        HapticManager.shared.impact(intensity: 0.25, sharpness: 0.7)
 
         run(.sequence([
             .wait(forDuration: Balance.respawnDelay),
@@ -685,7 +851,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             return
         }
 
-        guard tierA == tierB, let tier = CelestialTier(rawValue: tierA) else { return }
+        guard tierA == tierB, let tier = CelestialTier(rawValue: tierA) else {
+            if contact.collisionImpulse > 2.2 {
+                let speedA = abs(a.physicsBody?.velocity.dy ?? 0)
+                let speedB = abs(b.physicsBody?.velocity.dy ?? 0)
+                squashLand(speedA >= speedB ? a : b, intensity: 0.75)
+            }
+            return
+        }
 
         let polA = a.userData?["polarity"] as? Int ?? 0
         let polB = b.userData?["polarity"] as? Int ?? 0
@@ -693,7 +866,24 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // Like charges repel and refuse to fuse. With charge decay in place
         // this is now a temporary obstacle rather than a dead end.
         let likeCharges = (polA != 0 && polA == polB)
-        if likeCharges { return }
+        if likeCharges {
+            if playTime - lastRepelFeedback > 0.18 {
+                lastRepelFeedback = playTime
+                let chargeColor = Polarity(rawValue: polA)?.uiColor ?? .white
+                createRepelSparks(at: contact.contactPoint, color: chargeColor)
+                for node in [a, b] {
+                    if let sym = node.childNode(withName: "polaritySymbol") {
+                        sym.run(.sequence([
+                            .scale(to: 1.38, duration: 0.07),
+                            .scale(to: 1.0, duration: 0.11)
+                        ]), withKey: "repelPunch")
+                    }
+                }
+                AudioManager.shared.play(.repel, volume: 0.55)
+                HapticManager.shared.impact(intensity: 0.45, sharpness: 0.95)
+            }
+            return
+        }
 
         mergingIds.insert(idA)
         mergingIds.insert(idB)
@@ -706,9 +896,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                     at: contact.contactPoint, resultingPolarity: resulting)
     }
 
-    private func squashLand(_ node: SKShapeNode) {
+    private func squashLand(_ node: SKShapeNode, intensity: CGFloat = 1.0) {
         guard node.action(forKey: "squash") == nil else { return }
-        let down = SKAction.scaleX(to: 1.14, y: 0.86, duration: 0.06)
+        let sx = 1.0 + 0.14 * intensity
+        let sy = 1.0 - 0.14 * intensity
+        let down = SKAction.scaleX(to: sx, y: sy, duration: 0.06)
         down.timingMode = .easeOut
         let up = SKAction.scaleX(to: 1.0, y: 1.0, duration: 0.16)
         up.timingMode = .easeOut
@@ -737,17 +929,19 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         lastMergeTime = now
 
         let multiplier = comboCount
-        score += tier.scoreValue * multiplier
+        let gained = tier.scoreValue * multiplier
+        score += gained
         onComboChanged?(comboCount)
 
         runStats.recordMerge(resultTier: tier.nextTier?.rawValue, combo: comboCount)
 
+        showScorePopup(points: gained, at: point, color: tier.glowColor, isBig: multiplier > 1)
         if multiplier > 1 {
             showComboLabel(multiplier: multiplier, at: point)
             AudioManager.shared.play(.combo(level: multiplier), volume: 0.8)
         }
 
-        createExplosion(at: point, color: tier.glowColor)
+        createExplosion(at: point, color: tier.glowColor, tier: tier)
         spawnShockwave(in: self, at: point, color: tier.glowColor, radius: tier.radius * 2.0)
         AudioManager.shared.play(.merge(tier: tier.rawValue),
                                  volume: 0.55 + Float(tier.rawValue) * 0.06)
@@ -810,11 +1004,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if !isProp { swallowed += 1 }
         }
 
-        score += Balance.bigCrunchBonus * multiplier + swallowed * Balance.bigCrunchPerBody
+        let crunchPoints = Balance.bigCrunchBonus * multiplier + swallowed * Balance.bigCrunchPerBody
+        score += crunchPoints
 
+        showScorePopup(points: crunchPoints,
+                       at: CGPoint(x: size.width / 2, y: size.height * 0.55 - 38),
+                       color: .systemYellow,
+                       isBig: true)
         spawnShockwave(in: self, at: point, color: .purple, radius: reach)
         spawnShockwave(in: self, at: point, color: .white, radius: reach * 0.55)
-        createExplosion(at: point, color: .purple)
+        createExplosion(at: point, color: .purple, tier: .blackHole)
         spawnFlash(in: self, color: UIColor(white: 0.9, alpha: 1), intensity: 0.42)
         shake(bgLayer, amplitude: 22, duration: 0.5)
         hitStop(duration: 0.22, scale: 0.08)
@@ -979,29 +1178,102 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         ]))
     }
 
-    private func createExplosion(at position: CGPoint, color: UIColor) {
+    private func showScorePopup(points: Int, at position: CGPoint, color: UIColor, isBig: Bool) {
+        let label = SKLabelNode(text: "+\(points)")
+        label.fontName = "AvenirNext-Bold"
+        label.fontSize = isBig ? 22 : 16
+        label.fontColor = isBig ? .white : color.lightened(by: 0.35)
+        let margin: CGFloat = 46
+        let yOffset: CGFloat = isBig ? -18 : 10
+        label.position = CGPoint(
+            x: max(margin, min(size.width - margin, position.x)),
+            y: min(position.y + yOffset, topY - 24)
+        )
+        label.zPosition = 95
+        label.alpha = 0
+        addChild(label)
+
+        label.run(.group([
+            .sequence([
+                .fadeIn(withDuration: 0.08),
+                .wait(forDuration: 0.32),
+                .fadeOut(withDuration: 0.25),
+                .removeFromParent()
+            ]),
+            .moveBy(x: 0, y: 36, duration: 0.65)
+        ]))
+    }
+
+    private func createRepelSparks(at position: CGPoint, color: UIColor) {
         let emitter = SKEmitterNode()
         emitter.particleTexture = FX.spark
         emitter.particleBlendMode = .add
         emitter.particleColor = color
         emitter.particleColorBlendFactor = 1.0
-        emitter.particleBirthRate = 1200
-        emitter.numParticlesToEmit = 60
-        emitter.particleLifetime = 0.6
-        emitter.particleLifetimeRange = 0.3
-        emitter.particlePositionRange = CGVector(dx: 15, dy: 15)
-        emitter.particleSpeed = 220
-        emitter.particleSpeedRange = 120
+        emitter.particleBirthRate = 800
+        emitter.numParticlesToEmit = 14
+        emitter.particleLifetime = 0.25
+        emitter.particleLifetimeRange = 0.10
+        emitter.particlePositionRange = CGVector(dx: 6, dy: 6)
+        emitter.particleSpeed = 140
+        emitter.particleSpeedRange = 70
+        emitter.particleAlpha = 0.95
+        emitter.particleAlphaSpeed = -3.8
+        emitter.particleScale = 0.38
+        emitter.particleScaleRange = 0.18
+        emitter.particleScaleSpeed = -1.2
+        emitter.emissionAngleRange = .pi * 2
+        emitter.zPosition = 42
+        emitter.position = position
+        addChild(emitter)
+        emitter.run(.sequence([.wait(forDuration: 0.45), .removeFromParent()]))
+    }
+
+    private func createExplosion(at position: CGPoint, color: UIColor, tier: CelestialTier = .planet) {
+        let level = min(7, max(0, tier.rawValue))
+        let emitter = SKEmitterNode()
+        emitter.particleTexture = FX.spark
+        emitter.particleBlendMode = .add
+        emitter.particleColor = color
+        emitter.particleColorBlendFactor = 1.0
+        emitter.particleBirthRate = 1400
+        emitter.numParticlesToEmit = min(95, 28 + level * 10)
+        emitter.particleLifetime = 0.48 + Double(level) * 0.04
+        emitter.particleLifetimeRange = 0.25
+        emitter.particlePositionRange = CGVector(dx: 12 + CGFloat(level) * 2, dy: 12 + CGFloat(level) * 2)
+        emitter.particleSpeed = 150 + CGFloat(level) * 26
+        emitter.particleSpeedRange = 90 + CGFloat(level) * 12
         emitter.particleAlpha = 1.0
         emitter.particleAlphaSpeed = -1.8
-        emitter.particleScale = 0.6
-        emitter.particleScaleRange = 0.3
+        emitter.particleScale = 0.45 + CGFloat(level) * 0.05
+        emitter.particleScaleRange = 0.25
         emitter.particleScaleSpeed = -0.9
         emitter.emissionAngleRange = .pi * 2
         emitter.zPosition = 40
         emitter.position = position
         addChild(emitter)
         emitter.run(.sequence([.wait(forDuration: 1.0), .removeFromParent()]))
+
+        if !GameSettings.shared.reducedFlash {
+            let flash = SKSpriteNode(texture: FX.spark)
+            flash.name = "fxFlash"
+            flash.color = color
+            flash.colorBlendFactor = 0.45
+            flash.blendMode = .add
+            flash.position = position
+            flash.zPosition = 39
+            let baseScale = 0.6 + CGFloat(level) * 0.28
+            flash.setScale(baseScale * 0.4)
+            flash.alpha = 0.85
+            addChild(flash)
+            flash.run(.sequence([
+                .group([
+                    .scale(to: baseScale * 2.1, duration: 0.16),
+                    .fadeOut(withDuration: 0.18)
+                ]),
+                .removeFromParent()
+            ]))
+        }
     }
 
     // MARK: - Charge decay
@@ -1069,6 +1341,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         applyMagnetism(charged: charged)
         decayCharges(charged: charged, now: now)
         evaluateDanger(bodies: bodies, dt: dt, now: now)
+        if activeBody != nil { refreshLandingPreview() }
     }
 
     /// Caps speed and puts back anything that has left the play area.
@@ -1143,9 +1416,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func applyMagnetism(charged: [SKShapeNode]) {
-        guard charged.count > 1 else { return }
+        guard charged.count > 1 else {
+            attractFieldNode.path = nil
+            repelFieldNode.path = nil
+            return
+        }
         let radius = Balance.magnetRadius
         let radiusSq = radius * radius
+        let attractPath = CGMutablePath()
+        let repelPath = CGMutablePath()
 
         for i in 0..<(charged.count - 1) {
             let a = charged[i]
@@ -1164,13 +1443,21 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
                 let dist = sqrt(distSq)
                 let base = Balance.magnetStrength * (1 - dist / radius)
-                let magnitude = (polA != polB) ? base : -base * Balance.magnetRepelMultiplier
+                let attracts = (polA != polB)
+                let magnitude = attracts ? base : -base * Balance.magnetRepelMultiplier
                 let fx = (dx / dist) * magnitude
                 let fy = (dy / dist) * magnitude
                 pbA.applyForce(CGVector(dx: fx, dy: fy))
                 pbB.applyForce(CGVector(dx: -fx, dy: -fy))
+
+                let path = attracts ? attractPath : repelPath
+                path.move(to: a.position)
+                path.addLine(to: b.position)
             }
         }
+
+        attractFieldNode.path = attractPath.isEmpty ? nil : attractPath
+        repelFieldNode.path = repelPath.isEmpty ? nil : repelPath
     }
 
     private func decayCharges(charged: [SKShapeNode], now: TimeInterval) {
@@ -1273,7 +1560,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         physicsWorld.speed = 1.0
 
         dropGuide.alpha = 0
-        landingMarker.alpha = 0
+        landingGhost.alpha = 0
+        antimatterPreviewRing.isHidden = true
 
         AudioManager.shared.play(.gameOver, volume: 0.9)
         HapticManager.shared.impact(intensity: 0.9, sharpness: 0.3)
@@ -1333,7 +1621,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         reportedDanger = 0
 
         dropGuide.alpha = 1
-        landingMarker.alpha = 1
+        landingGhost.alpha = 1
         spawnActiveBody()
     }
 
@@ -1353,6 +1641,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         lastUpdateTime = 0
         playTime = 0
         lastWarningBeep = -10
+        lastRepelFeedback = -10
         comboCount = 0
         lastMergeTime = -10
         mergingIds.removeAll()
@@ -1368,7 +1657,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         // `removeAllActions` on the scene also cancels effects and labels that
         // were parented to the scene; clear their leftovers explicitly.
-        for child in children where child is SKLabelNode || child is SKEmitterNode {
+        for child in children where child is SKLabelNode || child is SKEmitterNode || child.name == "fxFlash" {
             child.removeFromParent()
         }
 
@@ -1381,11 +1670,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         dangerLine.strokeColor = UIColor(white: 1.0, alpha: 0.30)
         dangerLine.glowWidth = 0
         dropGuide.removeAllActions()
-        landingMarker.removeAllActions()
+        landingGhost.removeAllActions()
         dropGuide.alpha = 1
-        landingMarker.alpha = 1
+        landingGhost.alpha = 1
+        antimatterPreviewRing.isHidden = true
+        attractFieldNode.path = nil
+        repelFieldNode.path = nil
         dropGuide.position.x = size.width / 2
-        landingMarker.position.x = size.width / 2
 
         onDangerChanged?(0)
         reportedDanger = 0

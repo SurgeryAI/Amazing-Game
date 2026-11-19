@@ -23,6 +23,7 @@ final class AudioManager {
         case combo(level: Int)
         case drop
         case land
+        case repel
         case antimatter
         case bigCrunch
         case danger
@@ -37,6 +38,7 @@ final class AudioManager {
             case .combo(let l):   return "combo\(max(1, min(8, l)))"
             case .drop:           return "drop"
             case .land:           return "land"
+            case .repel:          return "repel"
             case .antimatter:     return "antimatter"
             case .bigCrunch:      return "bigcrunch"
             case .danger:         return "danger"
@@ -252,6 +254,18 @@ final class AudioManager {
             guard e > 0 else { return 0 }
             let s = sin(2 * Double.pi * f * t) + 0.3 * sin(2 * Double.pi * f * 2 * t)
             return Float(s * e * 0.26)
+        }
+
+        // Magnetic repulsion: crisp electric buzz when like charges refuse to merge.
+        buffers["repel"] = render(format: format, duration: 0.11) { t in
+            let e = AudioManager.envelope(t: t, duration: 0.11, attack: 0.002, decay: 30.0)
+            guard e > 0 else { return 0 }
+            let f1 = 420.0 - 110.0 * (t / 0.11)
+            let f2 = 635.0 - 140.0 * (t / 0.11)
+            let s = sin(2 * Double.pi * f1 * t) * 0.65
+                + sin(2 * Double.pi * f2 * t) * 0.45
+                + AudioManager.noise(t) * 0.15
+            return Float(s * e * 0.22)
         }
 
         // UI tap.
