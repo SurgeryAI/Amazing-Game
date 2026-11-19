@@ -237,12 +237,20 @@ final class ProgressManager: ObservableObject {
 
     /// Restores a streak broken today. Purely a convenience — it grants no
     /// score, no shards, and no gameplay advantage.
-    func recoverStreak() {
+    func recoverStreak(now: Date = Date()) {
         guard canRecoverStreak else { return }
         streak = max(streak, recoverableStreak)
         bestStreak = max(bestStreak, streak)
         recoverableStreak = 0
         recoverableOnKey = ""
+        // Anchor lastDailyKey to yesterday so refreshForToday() does not
+        // immediately see a >1-day gap and wipe the restored streak, and
+        // completing today's Daily Challenge increments it by 1.
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone.current
+        if let yesterday = cal.date(byAdding: .day, value: -1, to: now) {
+            lastDailyKey = DailyChallenge.dateKey(for: yesterday)
+        }
         saveStreak()
     }
 

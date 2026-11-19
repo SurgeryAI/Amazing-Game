@@ -65,12 +65,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var boundary = SKNode()
 
     private var comboCount = 0
-    private var lastMergeTime: TimeInterval = 0
+    private var lastMergeTime: TimeInterval = -10
 
     private var spawnBlockedRetries = 0
     private var gameOverTimer: TimeInterval = 0
     private var lastUpdateTime: TimeInterval = 0
-    private var lastWarningBeep: TimeInterval = 0
+    private var playTime: TimeInterval = 0
+    private var lastWarningBeep: TimeInterval = -10
     private var lastLandSound: TimeInterval = 0
     private var reportedDanger: Double = -1
 
@@ -173,14 +174,26 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     override func didChangeSize(_ oldSize: CGSize) {
         super.didChangeSize(oldSize)
         guard oldSize != size, size.width > 0, size.height > 0, boundary.parent != nil else { return }
+        rebuildBackground()
         rebuildBoundary()
         layoutGuides()
+        if let active = activeBody {
+            active.position.y = topY
+            updateActiveBodyPosition(x: active.position.x)
+        }
     }
 
-    private func buildEnvironment() {
+    private func rebuildBackground() {
+        bgLayer.removeAllActions()
+        bgLayer.removeAllChildren()
+        guard size.width > 0, size.height > 0 else { return }
         buildCosmicBackground(in: bgLayer, size: size)
         buildTwinklingStars(in: bgLayer, size: size)
         scheduleShootingStars(in: bgLayer, size: size)
+    }
+
+    private func buildEnvironment() {
+        rebuildBackground()
 
         rebuildBoundary()
 
@@ -614,7 +627,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // The charge clock starts on release, not on spawn, so time spent
         // aiming never eats into it.
         if polarity != .neutral {
-            stampCharge(on: active, at: CACurrentMediaTime())
+            stampCharge(on: active, at: playTime)
         }
 
         setupBodyPhysics(node: active, tier: tier)
@@ -714,7 +727,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         nodeA.removeFromParent()
         nodeB.removeFromParent()
 
-        let now = CACurrentMediaTime()
+        let now = playTime
         comboCount = (now - lastMergeTime <= Balance.comboWindow) ? comboCount + 1 : 1
         lastMergeTime = now
 
@@ -1023,7 +1036,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if lastUpdateTime == 0 { lastUpdateTime = currentTime }
         let dt = min(0.1, currentTime - lastUpdateTime)   // clamp after a stall
         lastUpdateTime = currentTime
-        let now = CACurrentMediaTime()
+        playTime += dt
+        let now = playTime
 
         applyTiltGravity()
 
@@ -1332,9 +1346,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         gameOverTimer = 0
         spawnBlockedRetries = 0
         lastUpdateTime = 0
-        lastWarningBeep = 0
+        playTime = 0
+        lastWarningBeep = -10
         comboCount = 0
-        lastMergeTime = 0
+        lastMergeTime = -10
         mergingIds.removeAll()
         activeBody = nil
         activeTouch = nil

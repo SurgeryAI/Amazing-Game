@@ -444,8 +444,11 @@ struct ContentView: View {
     private func showInterstitialThen(_ action: @escaping () -> Void) {
         // Read the flag *before* running the action, which resets run state.
         let wasPersonalBest = isNewBest
-        InterstitialAdManager.shared.showAdIfAppropriate(isPersonalBest: wasPersonalBest)
-        action()
+        isWatchingAd = true
+        InterstitialAdManager.shared.showAdIfAppropriate(isPersonalBest: wasPersonalBest) {
+            isWatchingAd = false
+            action()
+        }
     }
 }
 
